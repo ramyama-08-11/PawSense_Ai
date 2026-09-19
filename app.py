@@ -50,9 +50,16 @@ turso_token = os.getenv('TURSO_AUTH_TOKEN')
 database_url = os.getenv('DATABASE_URL')
 
 if turso_url and turso_token:
+    turso_url = turso_url.strip()
+    turso_token = turso_token.strip()
     clean_host = turso_url.replace('libsql://', '').replace('https://', '').split('/')[0].strip()
-    app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite+libsql://{clean_host}/?authToken={turso_token.strip()}&secure=true"
-    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'check_same_thread': False}}
+    app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite+libsql://{clean_host}/?authToken={turso_token}&secure=true"
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'connect_args': {
+            'check_same_thread': False,
+            'auth_token': turso_token,
+        }
+    }
 elif database_url:
     if database_url.startswith('postgres://'):
         database_url = database_url.replace('postgres://', 'postgresql://', 1)
