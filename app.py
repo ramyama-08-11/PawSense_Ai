@@ -49,7 +49,16 @@ turso_url = os.getenv('TURSO_DATABASE_URL') or os.getenv('TURSO_URL')
 turso_token = os.getenv('TURSO_AUTH_TOKEN')
 database_url = os.getenv('DATABASE_URL')
 
+has_turso = False
 if turso_url and turso_token:
+    try:
+        import sqlalchemy_libsql  # Explicitly import to register 'sqlite.libsql' dialect
+        has_turso = True
+    except Exception as e:
+        print(f"Warning: sqlalchemy_libsql could not be loaded: {e}")
+        has_turso = False
+
+if has_turso:
     turso_url = turso_url.strip()
     turso_token = turso_token.strip()
     clean_host = turso_url.replace('libsql://', '').replace('https://', '').split('/')[0].strip()
@@ -348,11 +357,33 @@ def not_found(e):
     return redirect(url_for('index'))
 
 
+@app.errorhandler(500)
+def server_error(e):
+    import traceback
+    err_tb = traceback.format_exc()
+    print("PawSense 500 Error Traceback:", err_tb)
+    # Clear any stale session state that might be causing user query failures
+    session.pop('user_id', None)
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
+    return render_template('login.html', error="Your session has expired. Please sign in or create a new account."), 200
+
+
 @app.route('/')
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
+    try:
+        user = User.query.get(session['user_id'])
+    except Exception as e:
+        print(f"Error fetching user from database: {e}")
+        session.pop('user_id', None)
+        return redirect(url_for('login'))
+
+    if not user:
+        session.pop('user_id', None)
+        return redirect(url_for('login'))
+
     # Pass the browser-restricted key to the frontend for Maps JS (if present)
     return render_template('index.html', user=user, google_browser_key=GOOGLE_BROWSER_KEY or '')
 

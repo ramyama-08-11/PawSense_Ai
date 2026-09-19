@@ -95,9 +95,9 @@
 
                 <div class="user-profile-container">
                     <div class="user-profile" id="user-profile-trigger">
-                        <div class="user-avatar">{{ user.username[:1].upper() }}</div>
+                        <div class="user-avatar">{{ (user.username if user and user.username else 'User')[:1].upper() }}</div>
                         <div class="user-meta">
-                            <span class="user-name">{{ user.username }}</span>
+                            <span class="user-name">{{ user.username if user and user.username else 'User' }}</span>
                             <span class="user-badge">Free Plan</span>
                         </div>
                         <i class="fas fa-chevron-up" id="profile-chevron"></i>
@@ -105,9 +105,9 @@
 
                     <div class="profile-dropdown" id="profile-dropdown">
                         <div class="dropdown-header">
-                            <div class="user-avatar-large">{{ user.username[:2].upper() }}</div>
+                            <div class="user-avatar-large">{{ (user.username if user and user.username else 'User')[:2].upper() }}</div>
                             <div class="user-info">
-                                <div class="user-full-name">{{ user.username }}</div>
+                                <div class="user-full-name">{{ user.username if user and user.username else 'User' }}</div>
                                 <div class="user-plan"><i class="fas fa-star"></i> Free Plan</div>
                             </div>
                         </div>
@@ -119,7 +119,7 @@
                             <li id="open-gallery-btn"><i class="fas fa-images"></i> My Generated Images</li>
                             <li onclick="openModal('profile')"><i class="fas fa-user-circle"></i> My Profile</li>
                             <li onclick="openModal('settings')"><i class="fas fa-cog"></i> Settings</li>
-                            {% if user.id == 1 %}
+                            {% if user and user.id == 1 %}
                             <li id="admin-cleanup-btn"><i class="fas fa-broom"></i> Run Cleanup (Admin)</li>
                             {% endif %}
                         </ul>
