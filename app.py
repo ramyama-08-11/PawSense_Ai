@@ -31,6 +31,8 @@ from sqlalchemy.exc import IntegrityError
 load_dotenv()
 
 app = Flask(__name__)
+from werkzeug.middleware.proxy_fix import ProxyFix
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 try:
     from flask_cors import CORS
     CORS(app)
@@ -248,6 +250,9 @@ def extract_model_response_text(response):
 
 
 @app.route('/')
+@app.route('/api/index')
+@app.route('/api/index.py')
+@app.route('/api')
 def index():
     if 'user_id' not in session:
         return redirect(url_for('login'))
