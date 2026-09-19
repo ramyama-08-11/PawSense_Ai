@@ -1,6 +1,7 @@
 import os
 import secrets
 import base64
+import tempfile
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, send_from_directory, abort
 import textwrap
 from werkzeug.utils import secure_filename
@@ -36,19 +37,39 @@ try:
 except Exception:
     # flask-cors not installed in this environment; proceed without CORS
     pass
-app.config['SECRET_KEY'] = secrets.token_hex(16)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pawsense.db'
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(16))
+
+# Detect Vercel / serverless environment
+IS_VERCEL = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+
+# Configure database: support DATABASE_URL, or /tmp for Vercel, or local sqlite
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    if database_url.startswith('postgres://'):
+        database_url = database_url.replace('postgres://', 'postgresql://', 1)
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+elif IS_VERCEL:
+    app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(tempfile.gettempdir(), 'pawsense.db')}"
+else:
+    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pawsense.db'
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['UPLOAD_FOLDER'] = os.path.join(app.root_path, 'static', 'uploads')
-app.config['REPORT_FOLDER'] = os.path.join(app.root_path, 'static', 'reports')
-app.config['ARCHIVE_FOLDER'] = os.path.join(app.root_path, 'static', 'archives')
+
+# Configure folders: on Vercel / serverless, write to /tmp to avoid read-only filesystem errors
+storage_base = os.path.join(tempfile.gettempdir(), 'pawsense') if IS_VERCEL else os.path.join(app.root_path, 'static')
+app.config['UPLOAD_FOLDER'] = os.path.join(storage_base, 'uploads')
+app.config['REPORT_FOLDER'] = os.path.join(storage_base, 'reports')
+app.config['ARCHIVE_FOLDER'] = os.path.join(storage_base, 'archives')
 app.config['GENERATED_RETENTION_DAYS'] = int(os.getenv('GENERATED_RETENTION_DAYS', '7'))
 app.config['CLEANUP_INTERVAL_HOURS'] = int(os.getenv('CLEANUP_INTERVAL_HOURS', '24'))
 app.config['ARCHIVE_RETENTION_DAYS'] = int(os.getenv('ARCHIVE_RETENTION_DAYS', '30'))
 
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-os.makedirs(app.config['REPORT_FOLDER'], exist_ok=True)
-os.makedirs(app.config['ARCHIVE_FOLDER'], exist_ok=True)
+try:
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['REPORT_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['ARCHIVE_FOLDER'], exist_ok=True)
+except Exception as e:
+    print(f"Warning: could not create storage directories: {e}")
 
 db.init_app(app)
 
@@ -69,13 +90,10 @@ if genai_api_key:
     genai.configure(api_key=genai_api_key)
 
 with app.app_context():
-    db.create_all()
-    # Start cleanup worker thread (daemon)
     try:
-        t = threading.Thread(target=_cleanup_worker, daemon=True)
-        t.start()
-    except Exception:
-        pass
+        db.create_all()
+    except Exception as e:
+        print(f"Warning: db.create_all() failed: {e}")
     # Ensure DB columns added by recent model changes exist (simple runtime migration)
     try:
         from sqlalchemy import text
@@ -1272,5 +1290,10 @@ def get_scan_report():
 
 
 if __name__ == '__main__':
+    try:
+        t = threading.Thread(target=_cleanup_worker, daemon=True)
+        t.start()
+    except Exception:
+        pass
     # Disable the reloader to avoid watchdog-related thread restart issues
     app.run(debug=True, port=5000, use_reloader=False)
