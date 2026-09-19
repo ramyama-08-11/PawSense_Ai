@@ -361,12 +361,16 @@ def not_found(e):
 def server_error(e):
     import traceback
     err_tb = traceback.format_exc()
-    print("PawSense 500 Error Traceback:", err_tb)
-    # Clear any stale session state that might be causing user query failures
+    print("PawSense 500 Error Traceback:\n", err_tb)
     session.pop('user_id', None)
+    err_msg = str(e)
+    if err_tb:
+        lines = [l.strip() for l in err_tb.strip().split('\n') if l.strip()]
+        if lines:
+            err_msg = lines[-1]
     if request.path.startswith('/api/'):
-        return jsonify({'error': 'Internal server error', 'details': str(e)}), 500
-    return render_template('login.html', error="Your session has expired. Please sign in or create a new account."), 200
+        return jsonify({'error': 'Internal server error', 'details': err_msg}), 500
+    return render_template('login.html', error=f"Server error: {err_msg}"), 200
 
 
 @app.route('/')
@@ -539,6 +543,34 @@ def mock_social_login(provider):
         return redirect(url_for('index'))
 
     return render_template('social_auth.html', provider=provider)
+
+@app.route('/api/debug-db', methods=['GET'])
+def debug_db():
+    import sys
+    info = {
+        'turso_url_set': bool(os.getenv('TURSO_DATABASE_URL') or os.getenv('TURSO_URL')),
+        'turso_token_set': bool(os.getenv('TURSO_AUTH_TOKEN')),
+        'is_vercel': IS_VERCEL,
+        'has_turso': has_turso,
+        'db_uri_prefix': str(app.config.get('SQLALCHEMY_DATABASE_URI', ''))[:40],
+        'python_version': sys.version,
+    }
+    try:
+        import sqlalchemy_libsql
+        info['sqlalchemy_libsql_imported'] = True
+    except Exception as e:
+        info['sqlalchemy_libsql_imported'] = False
+        info['sqlalchemy_libsql_error'] = str(e)
+
+    try:
+        u_count = User.query.count()
+        info['user_count'] = u_count
+        info['db_query_ok'] = True
+    except Exception as e:
+        info['db_query_ok'] = False
+        info['db_query_error'] = str(e)
+
+    return jsonify(info)
 
 @app.route('/api/sessions', methods=['GET'])
 def get_sessions():
