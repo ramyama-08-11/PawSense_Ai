@@ -140,54 +140,128 @@ with app.app_context():
         pass
 
 
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calculate distance in kilometers between two lat/lon coordinates."""
+    import math
+    try:
+        r = 6371.0
+        dlat = math.radians(float(lat2) - float(lat1))
+        dlon = math.radians(float(lon2) - float(lon1))
+        a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(float(lat1))) * math.cos(math.radians(float(lat2))) * math.sin(dlon / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+        return round(r * c, 2)
+    except Exception:
+        return None
+
+
 def get_nearby_hospitals(lat, lon):
-    """Query Google Places Nearby Search for veterinary hospitals near lat,lon.
-    Returns a list of dicts with name, address, lat, lng, rating.
+    """Query Google Places or OpenStreetMap for veterinary hospitals near lat,lon.
+    Returns a list of dicts with name, address, lat, lng, rating, distance_km, and navigation links.
     """
     key = GOOGLE_SERVER_KEY or genai_api_key or os.getenv("GOOGLE_API_KEY")
-    if not key:
-        return []
-    url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
-    params = {
-        'location': f"{lat},{lon}",
-        'rankby': 'distance',
-        'type': 'veterinary_care',
-        'key': key
-    }
-    try:
-        resp = requests.get(url, params=params, timeout=5)
-        data = resp.json()
-        results = []
-        for r in data.get('results', [])[:10]:
-            results.append({
-                'name': r.get('name'),
-                'address': r.get('vicinity'),
-                'lat': r.get('geometry', {}).get('location', {}).get('lat'),
-                'lng': r.get('geometry', {}).get('location', {}).get('lng'),
-                'rating': r.get('rating')
-            })
-        # Fallback to hospital+keyword if no veterinary_care results
-        if not results:
-            params2 = {
-                'location': f"{lat},{lon}",
-                'rankby': 'distance',
-                'type': 'hospital',
-                'keyword': 'veterinary',
-                'key': key
-            }
-            resp2 = requests.get(url, params=params2, timeout=5)
-            data2 = resp2.json()
-            for r in data2.get('results', [])[:10]:
+    results = []
+
+    # 1. Try Google Places Nearby Search if key is available
+    if key:
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+        params = {
+            'location': f"{lat},{lon}",
+            'rankby': 'distance',
+            'type': 'veterinary_care',
+            'key': key
+        }
+        try:
+            resp = requests.get(url, params=params, timeout=5)
+            data = resp.json()
+            for r in data.get('results', [])[:10]:
+                r_lat = r.get('geometry', {}).get('location', {}).get('lat')
+                r_lng = r.get('geometry', {}).get('location', {}).get('lng')
+                q_name = urllib.parse.quote(str(r.get('name') or ''))
+                q_addr = urllib.parse.quote(str(r.get('vicinity') or ''))
                 results.append({
                     'name': r.get('name'),
-                    'address': r.get('vicinity'),
-                    'lat': r.get('geometry', {}).get('location', {}).get('lat'),
-                    'lng': r.get('geometry', {}).get('location', {}).get('lng'),
-                    'rating': r.get('rating')
+                    'address': r.get('vicinity') or '',
+                    'lat': r_lat,
+                    'lng': r_lng,
+                    'rating': r.get('rating'),
+                    'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
+                    'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
+                    'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
                 })
-        return results
-    except Exception:
-        return []
+            
+            # Fallback to hospital+keyword if no veterinary_care results
+            if not results and data.get('status') == 'OK':
+                params2 = {
+                    'location': f"{lat},{lon}",
+                    'rankby': 'distance',
+                    'type': 'hospital',
+                    'keyword': 'veterinary',
+                    'key': key
+                }
+                resp2 = requests.get(url, params=params2, timeout=5)
+                data2 = resp2.json()
+                for r in data2.get('results', [])[:10]:
+                    r_lat = r.get('geometry', {}).get('location', {}).get('lat')
+                    r_lng = r.get('geometry', {}).get('location', {}).get('lng')
+                    q_name = urllib.parse.quote(str(r.get('name') or ''))
+                    q_addr = urllib.parse.quote(str(r.get('vicinity') or ''))
+                    results.append({
+                        'name': r.get('name'),
+                        'address': r.get('vicinity') or '',
+                        'lat': r_lat,
+                        'lng': r_lng,
+                        'rating': r.get('rating'),
+                        'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
+                        'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
+                        'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
+                    })
+        except Exception:
+            pass
+
+    # 2. Free OpenStreetMap Overpass API fallback if Google Places returned no results or is unavailable/unauthorized
+    post_fn = getattr(requests, 'post', None)
+    if not results and callable(post_fn):
+        try:
+            osm_query = f"""
+            [out:json][timeout:8];
+            (
+              node["amenity"="veterinary"](around:20000, {lat}, {lon});
+              way["amenity"="veterinary"](around:20000, {lat}, {lon});
+            );
+            out center 12;
+            """
+            headers = {"User-Agent": "PawSense-App/1.0 (veterinary-locator)"}
+            resp = post_fn("https://overpass-api.de/api/interpreter", data={"data": osm_query}, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                osm_data = resp.json()
+                for el in osm_data.get('elements', []):
+                    tags = el.get('tags', {})
+                    r_lat = el.get('lat') or (el.get('center') or {}).get('lat')
+                    r_lng = el.get('lon') or (el.get('center') or {}).get('lon')
+                    name = tags.get('name') or tags.get('name:en') or tags.get('operator') or 'Veterinary Clinic'
+                    addr_parts = [tags.get(k) for k in ['addr:housenumber', 'addr:street', 'addr:suburb', 'addr:city'] if tags.get(k)]
+                    address = ', '.join(addr_parts) if addr_parts else tags.get('address') or ''
+                    phone = tags.get('phone') or tags.get('contact:phone') or None
+                    q_name = urllib.parse.quote(name)
+                    q_addr = urllib.parse.quote(address)
+                    results.append({
+                        'name': name,
+                        'address': address,
+                        'phone': phone,
+                        'lat': r_lat,
+                        'lng': r_lng,
+                        'rating': None,
+                        'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
+                        'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
+                        'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
+                    })
+                # Sort by distance
+                results.sort(key=lambda x: x.get('distance_km') or 999999)
+                results = results[:10]
+        except Exception:
+            pass
+
+    return results
 
 
 def generate_svg_data_url(text, title='Diet Plan'):
@@ -1209,6 +1283,47 @@ def scan():
         'scan_analysis': scan_analysis if 'scan_analysis' in locals() else None,
         'image_path': image_path,
         'nearby_hospitals': hospitals
+    })
+
+
+@app.route('/api/nearby-vets', methods=['GET', 'POST'])
+def api_nearby_vets():
+    """Return nearby veterinary clinics based on provided latitude and longitude."""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    lat = request.args.get('lat') or (request.get_json(silent=True) or {}).get('lat') or request.form.get('lat')
+    lon = request.args.get('lon') or (request.get_json(silent=True) or {}).get('lon') or request.form.get('lon')
+
+    # If coordinates are missing, try IP geolocation fallback
+    if not lat or not lon:
+        try:
+            forwarded = request.headers.get('X-Forwarded-For')
+            client_ip = forwarded.split(',')[0].strip() if forwarded else request.remote_addr
+            if client_ip and client_ip not in ('127.0.0.1', '::1', 'localhost'):
+                ip_resp = requests.get(f"https://ipapi.co/{client_ip}/json/", timeout=3)
+                if ip_resp.status_code == 200:
+                    ip_data = ip_resp.json()
+                    lat = ip_data.get('latitude')
+                    lon = ip_data.get('longitude')
+        except Exception:
+            pass
+
+    if not lat or not lon:
+        return jsonify({'error': 'Latitude and longitude are required. Please enable location services in your browser.'}), 400
+
+    try:
+        lat = float(lat)
+        lon = float(lon)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid coordinates'}), 400
+
+    hospitals = get_nearby_hospitals(lat, lon)
+    return jsonify({
+        'nearby_hospitals': hospitals,
+        'lat': lat,
+        'lon': lon,
+        'maps_search_url': f"https://www.google.com/maps/search/veterinary+hospital/@{lat},{lon},14z"
     })
 
 
