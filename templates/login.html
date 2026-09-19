@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login – PAWSENSE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=4.0">
+    <style>
+        body { overflow: auto; background: var(--bg-main); }
+        #bg-canvas { position: fixed; top:0; left:0; width:100%; height:100%; z-index:0; }
+        .auth-wrap { min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; position:relative; z-index:1; }
+        .auth-card {
+            background: var(--bg-sidebar); backdrop-filter: var(--blur); -webkit-backdrop-filter: var(--blur);
+            border: 1px solid var(--border-color); border-radius: 24px;
+            padding: 40px 36px; width: 100%; max-width: 420px;
+            box-shadow: 0 24px 64px rgba(0,0,0,0.18);
+            animation: cardIn .5s cubic-bezier(.4,0,.2,1);
+        }
+        @keyframes cardIn { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:none; } }
+        .auth-logo { text-align:center; margin-bottom:28px; }
+        .auth-logo-icon {
+            width:64px; height:64px; border-radius:20px; background:var(--gradient);
+            display:inline-flex; align-items:center; justify-content:center;
+            color:#fff; font-size:1.8rem; margin-bottom:14px;
+            box-shadow:0 8px 24px rgba(59,130,246,.4);
+        }
+        .auth-logo h1 { font-size:1.7rem; font-weight:900; margin-bottom:4px; }
+        .auth-logo p { color:var(--text-secondary); font-size:.9rem; }
+        .gradient-text { background: var(--gradient); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+        .auth-error { background:rgba(239,68,68,.1); border:1px solid rgba(239,68,68,.3); color:#ef4444; padding:10px 14px; border-radius:10px; font-size:.88rem; margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .form-group { margin-bottom:16px; }
+        .form-group label { display:block; font-size:.85rem; font-weight:600; margin-bottom:7px; color:var(--text-secondary); }
+        .input-with-icon { position:relative; }
+        .input-with-icon i { position:absolute; left:13px; top:50%; transform:translateY(-50%); color:var(--text-secondary); font-size:.9rem; }
+        .input-with-icon input {
+            width:100%; padding:12px 14px 12px 38px;
+            background:rgba(0,0,0,.04); border:1.5px solid var(--border-color);
+            border-radius:12px; color:var(--text-primary); font-size:.95rem;
+            outline:none; font-family:'Outfit',sans-serif;
+            transition:border-color .2s, box-shadow .2s;
+        }
+        [data-theme="dark"] .input-with-icon input { background:rgba(255,255,255,.05); }
+        .input-with-icon input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(59,130,246,.2); }
+        .auth-btn { width:100%; margin-top:4px; }
+        .divider { text-align:center; position:relative; color:var(--text-secondary); font-size:.82rem; margin:20px 0; }
+        .divider::before,.divider::after { content:''; position:absolute; top:50%; width:calc(50% - 50px); height:1px; background:var(--border-color); }
+        .divider::before { left:0; } .divider::after { right:0; }
+        .social-btns { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; margin-top:10px; }
+        .btn-social {
+            display:flex; align-items:center; justify-content:center; flex-direction:column; gap:3px;
+            aspect-ratio:1 / 1; min-height:60px; padding:8px;
+            border-radius:12px; border:none;
+            color:#fff; font-size:.78rem; font-weight:700; cursor:pointer;
+            transition:transform .2s, box-shadow .2s, opacity .2s;
+            text-decoration:none;
+            box-shadow:0 10px 22px rgba(15,23,42,.12);
+            text-align:center;
+        }
+        .btn-social i { width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:.95rem; }
+        .btn-social span { display:block; line-height:1.1; letter-spacing:.02em; }
+        .btn-social:hover { transform:translateY(-1px); box-shadow:0 14px 28px rgba(15,23,42,.14); opacity:.98; }
+        .btn-google { background:linear-gradient(135deg,#ea4335,#fbbc05); }
+        .btn-facebook { background:linear-gradient(135deg,#1877f2,#0f5cd8); }
+        .btn-instagram { background:linear-gradient(135deg,#feda75,#d62976,#833ab4); }
+        .auth-footer { text-align:center; font-size:.87rem; color:var(--text-secondary); margin-top:20px; }
+        .auth-footer a { color:var(--accent); font-weight:600; text-decoration:none; }
+        .auth-footer a:hover { text-decoration:underline; }
+
+        /* Splash */
+        .splash-overlay {
+            position:fixed; inset:0; z-index:999;
+            background:var(--bg-main);
+            display:flex; align-items:center; justify-content:center; flex-direction:column; gap:18px;
+            transition:opacity .5s;
+        }
+        .splash-icon { width:90px; height:90px; border-radius:28px; background:var(--gradient); display:flex; align-items:center; justify-content:center; color:#fff; font-size:2.5rem; box-shadow:0 12px 40px rgba(59,130,246,.5); }
+        .splash-title { font-size:3rem; font-weight:900; }
+        .splash-sub { color:var(--text-secondary); font-size:1.1rem; }
+        .splash-cta { padding:14px 40px; border-radius:14px; border:none; background:var(--gradient); color:#fff; font-size:1rem; font-weight:700; cursor:pointer; margin-top:10px; transition:opacity .2s,transform .15s; }
+        .splash-cta:hover { opacity:.9; transform:translateY(-2px); }
+    </style>
+</head>
+<body>
+    <canvas id="bg-canvas"></canvas>
+
+    <!-- Splash Screen -->
+    <div id="splash-screen" class="splash-overlay">
+        <div class="splash-icon"><i class="fas fa-paw"></i></div>
+        <h1 class="splash-title gradient-text">PAWSENSE</h1>
+        <p class="splash-sub">Your AI Pet Care Assistant</p>
+        <button id="get-started-btn" class="splash-cta">Get Started <i class="fas fa-arrow-right"></i></button>
+    </div>
+
+    <div class="auth-wrap">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <div class="auth-logo-icon"><i class="fas fa-paw"></i></div>
+                <h1>Welcome to <span class="gradient-text">Pawsense</span></h1>
+                <p>Sign in to continue to your pet care assistant</p>
+            </div>
+
+            {% if error %}
+            <div class="auth-error"><i class="fas fa-exclamation-circle"></i> {{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/login">
+                <div class="form-group">
+                    <label for="username">Username</label>
+                    <div class="input-with-icon">
+                        <i class="fas fa-user"></i>
+                        <input type="text" id="username" name="username" required placeholder="Enter your username">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-with-icon">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" id="password" name="password" required placeholder="Enter your password">
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary auth-btn">
+                    <i class="fas fa-sign-in-alt"></i> Sign In
+                </button>
+            </form>
+
+            <div class="divider">or continue with</div>
+            <div class="social-btns">
+                <a href="/auth/google/login" class="btn-social btn-google">
+                    <i class="fab fa-google"></i>
+                    <span>Google</span>
+                </a>
+                <a href="/mock_social_login/facebook" class="btn-social btn-facebook">
+                    <i class="fab fa-facebook-f"></i>
+                    <span>Facebook</span>
+                </a>
+                <a href="/mock_social_login/instagram" class="btn-social btn-instagram">
+                    <i class="fab fa-instagram"></i>
+                    <span>Instagram</span>
+                </a>
+            </div>
+
+            <p class="auth-footer">Don't have an account? <a href="/signup">Sign up here</a></p>
+        </div>
+    </div>
+
+    <script>
+        // Canvas background (same as main app)
+        (function() {
+            const canvas = document.getElementById('bg-canvas');
+            const ctx = canvas.getContext('2d');
+            function resize() { canvas.width = innerWidth; canvas.height = innerHeight; }
+            resize(); window.addEventListener('resize', resize);
+            const orbs = [220,260,200,280].map((hue,i) => ({
+                x: Math.random()*innerWidth, y: Math.random()*innerHeight,
+                r: 180+Math.random()*200, dx:(Math.random()-.5)*.4, dy:(Math.random()-.5)*.4, hue
+            }));
+            function draw() {
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                orbs.forEach(o => {
+                    o.x+=o.dx; o.y+=o.dy;
+                    if(o.x<-o.r) o.x=canvas.width+o.r; if(o.x>canvas.width+o.r) o.x=-o.r;
+                    if(o.y<-o.r) o.y=canvas.height+o.r; if(o.y>canvas.height+o.r) o.y=-o.r;
+                    const g=ctx.createRadialGradient(o.x,o.y,0,o.x,o.y,o.r);
+                    g.addColorStop(0,`hsla(${o.hue},80%,65%,0.12)`);
+                    g.addColorStop(1,`hsla(${o.hue},80%,65%,0)`);
+                    ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2);
+                    ctx.fillStyle=g; ctx.fill();
+                });
+                requestAnimationFrame(draw);
+            }
+            draw();
+        })();
+
+        // Splash logic
+        const splash = document.getElementById('splash-screen');
+        const btn = document.getElementById('get-started-btn');
+        if (!sessionStorage.getItem('splashShown')) {
+            btn.addEventListener('click', () => {
+                splash.style.opacity = '0';
+                setTimeout(() => splash.style.display = 'none', 500);
+                sessionStorage.setItem('splashShown', 'true');
+            });
+        } else {
+            splash.style.display = 'none';
+        }
+    </script>
+</body>
+</html>

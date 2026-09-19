@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ provider.title() }} Auth - PAWSENSE</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        body.auth-body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top left, rgba(59,130,246,.16), transparent 36%),
+                        radial-gradient(circle at bottom right, rgba(139,92,246,.18), transparent 28%),
+                        linear-gradient(135deg, #0f172a, #111827);
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .auth-container {
+            width: 100%;
+            max-width: 460px;
+        }
+        .auth-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: 28px;
+            background: rgba(15,23,42,.88);
+            border: 1px solid rgba(148,163,184,.18);
+            box-shadow: 0 28px 80px rgba(15,23,42,.45);
+            backdrop-filter: blur(22px);
+        }
+        .auth-card::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top left, rgba(59,130,246,.18), transparent 30%),
+                        radial-gradient(circle at bottom right, rgba(236,72,153,.16), transparent 25%);
+            opacity: .65;
+            pointer-events: none;
+        }
+        .auth-card > * { position: relative; z-index: 1; }
+        .auth-logo {
+            text-align: center;
+            padding: 40px 32px 24px;
+        }
+        .logo-circle {
+            width: 88px;
+            height: 88px;
+            border-radius: 26px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 1.8rem;
+            box-shadow: 0 24px 48px rgba(15,23,42,.28);
+            margin-bottom: 18px;
+        }
+        .auth-logo h1 {
+            font-size: 1.9rem;
+            font-weight: 800;
+            margin-bottom: 10px;
+            letter-spacing: -.03em;
+            color: #f8fafc;
+        }
+        .auth-logo p {
+            margin: 0;
+            color: #cbd5e1;
+            font-size: .96rem;
+            line-height: 1.6;
+        }
+        .auth-form {
+            padding: 0 32px 32px;
+        }
+        .form-group {
+            margin-bottom: 18px;
+        }
+        .form-group label {
+            display: block;
+            color: #94a3b8;
+            font-size: .84rem;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+        .input-with-icon {
+            position: relative;
+        }
+        .input-with-icon i {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+        }
+        .input-with-icon input {
+            width: 100%;
+            padding: 14px 16px 14px 44px;
+            border-radius: 16px;
+            border: 1px solid rgba(148,163,184,.18);
+            background: rgba(15,23,42,.7);
+            color: #e2e8f0;
+            outline: none;
+            transition: border-color .2s, box-shadow .2s;
+        }
+        .input-with-icon input:focus {
+            border-color: rgba(59,130,246,.75);
+            box-shadow: 0 0 0 4px rgba(59,130,246,.12);
+        }
+        .btn-primary.auth-btn {
+            width: 100%;
+            padding: 14px 0;
+            border-radius: 16px;
+            border: none;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            color: #fff;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform .2s, box-shadow .2s;
+            box-shadow: 0 18px 40px rgba(59,130,246,.22);
+        }
+        .btn-primary.auth-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 24px 46px rgba(59,130,246,.28);
+        }
+        .auth-footer {
+            text-align: center;
+            color: #94a3b8;
+            padding: 0 32px 32px;
+            font-size: .9rem;
+        }
+        .auth-footer a {
+            color: #88bdfd;
+            text-decoration: none;
+            font-weight: 700;
+        }
+        .auth-footer a:hover {
+            text-decoration: underline;
+        }
+        .auth-error {
+            margin: 0 32px 16px;
+            background: rgba(248,113,113,.12);
+            border: 1px solid rgba(248,113,113,.28);
+            color: #fecaca;
+        }
+    </style>
+</head>
+<body class="auth-body">
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-logo">
+                <div class="logo-circle" style="background: 
+                    {% if provider == 'google' %}#db4437{% elif provider == 'facebook' %}#1877f2{% elif provider == 'instagram' %}#e1306c{% else %}var(--accent-color){% endif %};">
+                    <i class="fab fa-{{ provider }}"></i>
+                </div>
+                <h1>{{ provider.title() }} Login</h1>
+                <p>Please confirm your details to continue</p>
+            </div>
+            
+            {% if error %}
+            <div class="auth-error">
+                <i class="fas fa-exclamation-circle"></i> {{ error }}
+            </div>
+            {% endif %}
+
+            <form method="POST" action="/mock_social_login/{{ provider }}" class="auth-form">
+                <div class="form-group">
+                    <label for="username">User ID / Username</label>
+                    <div class="input-with-icon">
+                        <i class="fas fa-user"></i>
+                        <input type="text" id="username" name="username" required placeholder="Enter {{ provider.title() }} User ID">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-with-icon">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" id="password" name="password" required placeholder="Enter password">
+                    </div>
+                </div>
+                <button type="submit" class="btn-primary auth-btn" style="background: linear-gradient(135deg, {% if provider == 'google' %}#fbbc05,#ea4335{% elif provider == 'facebook' %}#1877f2,#0f5cd8{% elif provider == 'instagram' %}#feda75,#d62976,#833ab4{% endif %}); border-color: transparent;">
+                    Continue with {{ provider.title() }}
+                </button>
+            </form>
+            
+            <p class="auth-footer">
+                <a href="/login"><i class="fas fa-arrow-left"></i> Back to main login</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
