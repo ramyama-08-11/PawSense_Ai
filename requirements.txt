@@ -5,9 +5,8 @@ python-dotenv==1.0.1
 werkzeug==3.0.3
 pillow>=12.3.0
 requests==2.31.0
-reportlab==4.0.0
+reportlab>=4.2.5
 pytest==7.4.0
 pytest-mock==3.11.0
-cairosvg==2.6.0
 flask-cors==4.0.0
 alembic==1.11.1
