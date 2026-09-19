@@ -504,7 +504,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const content = messageInput.value.trim();
         if (!content && !(selectedFiles && selectedFiles.length)) return;
-        
+
+        // Route natural language queries about finding nearest vets directly to the locator
+        const isVetLocatorIntent = /(find|show|search|nearest|nearby|local|emergency)\s+(vet|veterinar|hospital|clinic)/i.test(content) ||
+                                  /(vet|veterinar|hospital|clinic)\s+(near|close|around|location)/i.test(content);
+        if (isVetLocatorIntent && !(selectedFiles && selectedFiles.length)) {
+            messageInput.value = '';
+            messageInput.style.height = 'auto';
+            findNearbyVets();
+            return;
+        }
+
         if (!currentSessionId) {
             await createNewSession();
         }
@@ -1238,7 +1248,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (scanBtn) {
         scanBtn.addEventListener('click', async () => {
             if (!(selectedFiles && selectedFiles.length)) {
-                alert('Please attach or capture a photo of your pet first.');
+                // If user clicks hospital icon without a photo, directly find nearest veterinary hospitals
+                findNearbyVets();
                 return;
             }
 
@@ -1334,16 +1345,9 @@ document.addEventListener('DOMContentLoaded', () => {
                             }
                         }
 
-                        // If hospitals found, display them as a list with map links
+                        // If hospitals found, display them using rich locator cards
                         if (data.nearby_hospitals && data.nearby_hospitals.length) {
-                            function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#039;'); }
-                            const listItems = data.nearby_hospitals.map((h, idx) => {
-                                const mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name + ' ' + (h.address||''))}`;
-                                const nameEsc = escapeHtml(h.name);
-                                const addrEsc = escapeHtml(h.address || '');
-                                return `<li class="hospital-item" data-idx="${idx}" data-lat="${h.lat}" data-lng="${h.lng}" data-name="${nameEsc}" data-address="${addrEsc}"><a href="${mapsLink}" target="_blank">${nameEsc}</a>${h.address ? ` — ${addrEsc}` : ''}${h.rating ? ` — ⭐ ${h.rating}` : ''}</li>`;
-                            }).join('');
-                            const hospitalsHtml = `<div class="nearby-hospitals"><strong>Nearby veterinary clinics</strong><ul>${listItems}</ul><div style="font-size:.85rem;color:var(--text-secondary);margin-top:8px;">Tap a clinic to view it on the map.</div></div>`;
+                            const hospitalsHtml = renderNearbyVetsHtml(data.nearby_hospitals, data.maps_search_url);
                             appendRawMessage('model', hospitalsHtml);
                         } else {
                             appendMessage('model', 'No nearby veterinary clinics found for your location.');
@@ -2079,16 +2083,175 @@ document.addEventListener('DOMContentLoaded', () => {
             .catch(err => console.error('Service Worker registration failed', err));
     }
 
-    // --- Map Modal Logic ---
+    // --- Nearest Veterinary Hospital Locator & Map Modal ---
     const mapModal = document.getElementById('map-modal');
     const closeMapBtn = document.getElementById('close-map-btn');
     const mapContainer = document.getElementById('map-container');
     const mapClinicList = document.getElementById('map-clinic-list');
+    const mapNotice = document.getElementById('map-notice');
     let currentHospitals = [];
     let googleMapsLoaded = false;
     let mapInstance = null;
     let markers = [];
     let infoWindow = null;
+    let leafletMap = null;
+    let leafletMarkers = [];
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function renderNearbyVetsHtml(hospitals, mapsSearchUrl) {
+        if (!hospitals || !hospitals.length) {
+            return `
+                <div class="nearby-vets-container empty">
+                    <div class="nearby-vets-header">
+                        <div class="nv-title"><i class="fas fa-hospital-alt"></i> Veterinary Hospital Locator</div>
+                    </div>
+                    <div style="margin-top:10px;">
+                        <a href="${mapsSearchUrl || 'https://www.google.com/maps/search/veterinary+hospital/'}" target="_blank" class="btn-primary small" style="display:inline-flex; align-items:center; gap:6px;">
+                            <i class="fab fa-google"></i> Open Google Maps Search
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        const cardsHtml = hospitals.map((h, idx) => {
+            const nameEsc = escapeHtml(h.name);
+            const addrEsc = escapeHtml(h.address || 'Address available on map');
+            const distBadge = h.distance_km ? `<span class="nv-badge distance"><i class="fas fa-location-arrow"></i> ${h.distance_km} km away</span>` : '';
+            const ratingBadge = h.rating ? `<span class="nv-badge rating">⭐ ${h.rating}</span>` : '';
+            const phoneBadge = h.phone ? `<a href="tel:${h.phone}" class="nv-badge phone"><i class="fas fa-phone"></i> ${h.phone}</a>` : '';
+            const dirUrl = h.directions_url || `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lng}`;
+            const mapsUrl = h.maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name + ' ' + (h.address || ''))}`;
+
+            return `
+                <div class="nv-clinic-card" data-idx="${idx}" data-lat="${h.lat}" data-lng="${h.lng}" data-name="${nameEsc}" data-address="${addrEsc}" data-dist="${h.distance_km || ''}" data-dir="${dirUrl}" data-maps="${mapsUrl}">
+                    <div class="nv-clinic-info">
+                        <div class="nv-clinic-name">${nameEsc}</div>
+                        <div class="nv-clinic-addr"><i class="fas fa-map-pin" style="color:var(--primary); font-size:0.8rem;"></i> ${addrEsc}</div>
+                        <div class="nv-clinic-meta">
+                            ${distBadge}
+                            ${ratingBadge}
+                            ${phoneBadge}
+                        </div>
+                    </div>
+                    <div class="nv-clinic-actions">
+                        <button type="button" class="nv-action-btn view-map-btn" data-idx="${idx}" title="View on interactive map">
+                            <i class="fas fa-map-marked-alt"></i> Map
+                        </button>
+                        <a href="${dirUrl}" target="_blank" class="nv-action-btn directions-btn" title="Navigate with Google Maps">
+                            <i class="fas fa-directions"></i> Go
+                        </a>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div class="nearby-vets-container">
+                <div class="nearby-vets-header">
+                    <div class="nv-title"><i class="fas fa-hospital-alt"></i> Nearest Veterinary Hospitals</div>
+                    <div class="nv-subtitle">Found ${hospitals.length} clinic${hospitals.length > 1 ? 's' : ''} near your location</div>
+                </div>
+                <div class="nearby-vets-list">
+                    ${cardsHtml}
+                </div>
+                <div class="nearby-vets-footer">
+                    <button type="button" class="btn-primary small open-all-map-modal-btn">
+                        <i class="fas fa-map-marked-alt"></i> View on Interactive Map
+                    </button>
+                    ${mapsSearchUrl ? `<a href="${mapsSearchUrl}" target="_blank" class="btn-outline small"><i class="fab fa-google"></i> Open in Google Maps</a>` : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    async function findNearbyVets() {
+        if (!currentSessionId) {
+            await createNewSession();
+        }
+
+        // Add user prompt to chat
+        appendMessage('user', '🏥 Find nearest veterinary hospitals based on my location');
+
+        const loadingMsgId = appendRawMessage('model', `
+            <div class="vet-loading-msg" id="vet-loading-indicator">
+                <i class="fas fa-spinner fa-spin"></i>
+                <span>Getting your location & searching nearest veterinary clinics...</span>
+            </div>
+        `);
+
+        const removeLoading = () => {
+            const el = document.getElementById(loadingMsgId);
+            if (el) el.remove();
+            else {
+                const ind = document.getElementById('vet-loading-indicator');
+                if (ind && ind.closest('.message')) ind.closest('.message').remove();
+            }
+        };
+
+        const fetchClinics = async (lat, lon) => {
+            try {
+                let url = '/api/nearby-vets';
+                if (lat != null && lon != null) {
+                    url += `?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`;
+                }
+                const resp = await fetch(url);
+                removeLoading();
+
+                if (resp.status === 401) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const data = await resp.json();
+                if (data.error && (!data.nearby_hospitals || !data.nearby_hospitals.length)) {
+                    appendMessage('model', `Location lookup: ${data.error}`);
+                    return;
+                }
+
+                const hospitals = data.nearby_hospitals || [];
+                const html = renderNearbyVetsHtml(hospitals, data.maps_search_url);
+                appendRawMessage('model', html);
+
+                // Auto-open map modal if hospitals found
+                if (hospitals.length > 0) {
+                    openMapModal(hospitals, 0);
+                }
+                await loadSessions();
+            } catch (err) {
+                removeLoading();
+                console.error('Error finding vets:', err);
+                appendMessage('model', 'Failed to retrieve nearby clinics. Please check your network connection or location permissions.');
+            }
+        };
+
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    fetchClinics(pos.coords.latitude, pos.coords.longitude);
+                },
+                (err) => {
+                    console.warn('Browser geolocation failed/denied, falling back to IP lookup:', err);
+                    fetchClinics(null, null);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+            );
+        } else {
+            fetchClinics(null, null);
+        }
+    }
+
+    // Attach click listeners to all vet locator entry points
+    const findVetsBtn = document.getElementById('find-vets-btn');
+    if (findVetsBtn) findVetsBtn.addEventListener('click', findNearbyVets);
+
+    const chipFindVets = document.getElementById('chip-find-vets');
+    if (chipFindVets) chipFindVets.addEventListener('click', findNearbyVets);
+
+    const cardFindVets = document.getElementById('card-find-vets');
+    if (cardFindVets) cardFindVets.addEventListener('click', findNearbyVets);
 
     function loadGoogleMaps() {
         return new Promise((resolve, reject) => {
@@ -2103,73 +2266,229 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function renderLeafletMap(hospitals, startIndex) {
+        if (typeof L === 'undefined') {
+            console.warn('Leaflet library is not available');
+            return;
+        }
+
+        if (mapNotice) {
+            if (!window.GOOGLE_BROWSER_KEY) {
+                mapNotice.style.display = 'block';
+                mapNotice.innerHTML = `<i class="fas fa-info-circle"></i> Showing interactive map via OpenStreetMap. To enable Google Maps view, add <code>GOOGLE_BROWSER_KEY</code> in your .env or Vercel environment variables.`;
+            } else {
+                mapNotice.style.display = 'none';
+            }
+        }
+
+        const first = hospitals[startIndex] || hospitals[0];
+        const centerLat = parseFloat(first.lat) || 0;
+        const centerLng = parseFloat(first.lng) || 0;
+
+        if (!leafletMap) {
+            mapContainer.innerHTML = '';
+            leafletMap = L.map(mapContainer).setView([centerLat, centerLng], 14);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+            }).addTo(leafletMap);
+        } else {
+            leafletMarkers.forEach(m => leafletMap.removeLayer(m));
+            leafletMarkers = [];
+        }
+
+        const bounds = [];
+        hospitals.forEach((h, i) => {
+            const lat = parseFloat(h.lat);
+            const lng = parseFloat(h.lng);
+            if (isNaN(lat) || isNaN(lng)) return;
+            const latlng = [lat, lng];
+            bounds.push(latlng);
+
+            const marker = L.marker(latlng).addTo(leafletMap);
+            const dirLink = h.directions_url || `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+            const gmapsLink = h.maps_url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name + ' ' + (h.address || ''))}`;
+
+            marker.bindPopup(`
+                <div style="min-width:180px; font-family:inherit;">
+                    <strong style="font-size:0.95rem;color:#1e293b;display:block;margin-bottom:4px;">${escapeHtml(h.name)}</strong>
+                    <div style="font-size:0.82rem;color:#64748b;margin-bottom:6px;">${escapeHtml(h.address || '')}</div>
+                    ${h.distance_km ? `<div style="font-size:0.82rem;color:var(--primary,#4f46e5);font-weight:600;margin-bottom:6px;">📍 ${h.distance_km} km away</div>` : ''}
+                    <div style="display:flex; gap:6px; margin-top:6px;">
+                        <a href="${dirLink}" target="_blank" style="padding:4px 8px;background:#4f46e5;color:#fff;border-radius:6px;font-size:0.78rem;text-decoration:none;font-weight:600;">🚗 Directions</a>
+                        <a href="${gmapsLink}" target="_blank" style="padding:4px 8px;background:#f1f5f9;color:#334155;border-radius:6px;font-size:0.78rem;text-decoration:none;font-weight:600;">Google Maps</a>
+                    </div>
+                </div>
+            `);
+            leafletMarkers.push(marker);
+
+            if (i === startIndex) {
+                marker.openPopup();
+                leafletMap.setView(latlng, 15);
+            }
+        });
+
+        if (bounds.length > 0 && startIndex === 0) {
+            leafletMap.fitBounds(bounds, { padding: [35, 35] });
+        }
+
+        setTimeout(() => {
+            if (leafletMap) leafletMap.invalidateSize();
+        }, 250);
+    }
+
     async function openMapModal(hospitals, startIndex = 0) {
         if (!hospitals || hospitals.length === 0) return;
         currentHospitals = hospitals;
         mapClinicList.innerHTML = '';
+
         hospitals.forEach((h, i) => {
             const item = document.createElement('div');
-            item.className = 'map-clinic-item';
-            item.innerHTML = `<strong>${h.name}</strong><div style="font-size:.9rem;color:var(--text-secondary);">${h.address||''}${h.rating?` — ⭐ ${h.rating}`:''}</div>`;
+            item.className = 'map-clinic-item' + (i === startIndex ? ' active' : '');
+            const distText = h.distance_km ? `<span style="font-size:0.78rem;color:var(--primary);font-weight:600;"><i class="fas fa-location-arrow"></i> ${h.distance_km} km</span>` : '';
+            const ratingText = h.rating ? `<span style="font-size:0.78rem;color:#f59e0b;">⭐ ${h.rating}</span>` : '';
+            item.innerHTML = `
+                <strong style="display:block;margin-bottom:2px;">${escapeHtml(h.name)}</strong>
+                <div style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:4px;">${escapeHtml(h.address || '')}</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    ${distText}
+                    ${ratingText}
+                </div>
+            `;
             item.addEventListener('click', () => {
-                if (markers[i]) {
+                document.querySelectorAll('.map-clinic-item').forEach(el => el.classList.remove('active'));
+                item.classList.add('active');
+
+                if (googleMapsLoaded && markers[i] && mapInstance) {
                     mapInstance.panTo(markers[i].getPosition());
                     mapInstance.setZoom(15);
                     google.maps.event.trigger(markers[i], 'click');
+                } else if (leafletMap && leafletMarkers[i]) {
+                    const lat = parseFloat(h.lat);
+                    const lng = parseFloat(h.lng);
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                        leafletMap.setView([lat, lng], 15);
+                        leafletMarkers[i].openPopup();
+                    }
                 }
             });
             mapClinicList.appendChild(item);
         });
 
+        mapModal.style.display = 'flex';
+
         if (window.GOOGLE_BROWSER_KEY) {
             try {
                 await loadGoogleMaps();
-                // initialize map
-                const first = hospitals[startIndex];
+                if (mapNotice) mapNotice.style.display = 'none';
+                const first = hospitals[startIndex] || hospitals[0];
                 const center = { lat: parseFloat(first.lat) || 0, lng: parseFloat(first.lng) || 0 };
-                mapInstance = new google.maps.Map(mapContainer, { center, zoom: 13 });
+                mapInstance = new google.maps.Map(mapContainer, { center, zoom: 14 });
                 infoWindow = new google.maps.InfoWindow();
-                // clear old markers
+
                 markers.forEach(m => m.setMap(null));
                 markers = [];
                 hospitals.forEach((h, i) => {
                     const pos = { lat: parseFloat(h.lat), lng: parseFloat(h.lng) };
                     const marker = new google.maps.Marker({ position: pos, map: mapInstance, title: h.name });
+                    const dirLink = h.directions_url || `https://www.google.com/maps/dir/?api=1&destination=${pos.lat},${pos.lng}`;
                     marker.addListener('click', () => {
-                        infoWindow.setContent(`<div style="min-width:180px;"><strong>${h.name}</strong><div style="font-size:.9rem;color:#444;">${h.address || ''}</div>${h.rating?`<div>⭐ ${h.rating}</div>`:''}</div>`);
+                        infoWindow.setContent(`
+                            <div style="min-width:180px;padding:4px;">
+                                <strong>${escapeHtml(h.name)}</strong>
+                                <div style="font-size:.85rem;color:#555;margin:4px 0;">${escapeHtml(h.address || '')}</div>
+                                ${h.distance_km ? `<div style="font-size:.85rem;color:#4f46e5;font-weight:600;">📍 ${h.distance_km} km away</div>` : ''}
+                                ${h.rating ? `<div>⭐ ${h.rating}</div>` : ''}
+                                <div style="margin-top:6px;">
+                                    <a href="${dirLink}" target="_blank" style="padding:4px 8px;background:#4f46e5;color:#fff;border-radius:4px;font-size:0.8rem;text-decoration:none;">🚗 Directions</a>
+                                </div>
+                            </div>
+                        `);
                         infoWindow.open(mapInstance, marker);
                     });
                     markers.push(marker);
                 });
-                // open info on first
+
                 if (markers[startIndex]) google.maps.event.trigger(markers[startIndex], 'click');
             } catch (err) {
-                console.error('Failed to load Google Maps:', err);
-                // fallback: open first clinic in Google Maps in new tab
-                const h = hospitals[startIndex];
-                const mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name + ' ' + (h.address||''))}`;
-                window.open(mapsLink, '_blank');
-                return;
+                console.warn('Google Maps JS loading failed, falling back to Leaflet:', err);
+                renderLeafletMap(hospitals, startIndex);
             }
         } else {
-            // No API key: open first in new tab
-            const h = hospitals[startIndex];
-            const mapsLink = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(h.name + ' ' + (h.address||''))}`;
-            window.open(mapsLink, '_blank');
-            return;
+            renderLeafletMap(hospitals, startIndex);
         }
-
-        mapModal.style.display = 'flex';
     }
 
     if (closeMapBtn) closeMapBtn.addEventListener('click', () => { mapModal.style.display = 'none'; });
 
-    // Delegate clicks on hospital items inside chat to open modal
+    // Delegate clicks inside chat for vet cards and buttons
     document.addEventListener('click', (e) => {
+        // 1. Click on "View on Interactive Map" in footer
+        const openAllBtn = e.target.closest && e.target.closest('.open-all-map-modal-btn');
+        if (openAllBtn) {
+            e.preventDefault();
+            const container = openAllBtn.closest('.nearby-vets-container');
+            if (!container) return;
+            const cards = Array.from(container.querySelectorAll('.nv-clinic-card'));
+            const hospitals = cards.map(c => ({
+                name: c.dataset.name,
+                address: c.dataset.address,
+                lat: c.dataset.lat,
+                lng: c.dataset.lng,
+                distance_km: c.dataset.dist,
+                directions_url: c.dataset.dir,
+                maps_url: c.dataset.maps
+            }));
+            openMapModal(hospitals, 0);
+            return;
+        }
+
+        // 2. Click on "Map" button on a specific clinic card
+        const viewMapBtn = e.target.closest && e.target.closest('.view-map-btn');
+        if (viewMapBtn) {
+            e.preventDefault();
+            const card = viewMapBtn.closest('.nv-clinic-card');
+            const container = viewMapBtn.closest('.nearby-vets-container');
+            if (!card || !container) return;
+            const cards = Array.from(container.querySelectorAll('.nv-clinic-card'));
+            const hospitals = cards.map(c => ({
+                name: c.dataset.name,
+                address: c.dataset.address,
+                lat: c.dataset.lat,
+                lng: c.dataset.lng,
+                distance_km: c.dataset.dist,
+                directions_url: c.dataset.dir,
+                maps_url: c.dataset.maps
+            }));
+            const idx = parseInt(card.dataset.idx || '0', 10) || 0;
+            openMapModal(hospitals, idx);
+            return;
+        }
+
+        // 3. Click on the clinic card itself (excluding links and action buttons)
+        const clinicCard = e.target.closest && e.target.closest('.nv-clinic-card');
+        if (clinicCard && !e.target.closest('a') && !e.target.closest('button')) {
+            const container = clinicCard.closest('.nearby-vets-container');
+            if (!container) return;
+            const cards = Array.from(container.querySelectorAll('.nv-clinic-card'));
+            const hospitals = cards.map(c => ({
+                name: c.dataset.name,
+                address: c.dataset.address,
+                lat: c.dataset.lat,
+                lng: c.dataset.lng,
+                distance_km: c.dataset.dist,
+                directions_url: c.dataset.dir,
+                maps_url: c.dataset.maps
+            }));
+            const idx = parseInt(clinicCard.dataset.idx || '0', 10) || 0;
+            openMapModal(hospitals, idx);
+            return;
+        }
+
+        // 4. Backwards compatibility for .hospital-item
         const el = e.target.closest && e.target.closest('.hospital-item');
         if (el) {
             e.preventDefault();
-            // gather hospitals from the nearest message block
             const msg = el.closest('.nearby-hospitals');
             if (!msg) return;
             const items = Array.from(msg.querySelectorAll('.hospital-item'));

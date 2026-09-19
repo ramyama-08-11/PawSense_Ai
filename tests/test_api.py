@@ -202,3 +202,47 @@ def test_google_oauth_login_redirects_to_google_when_configured(monkeypatch):
     assert resp.status_code == 302
     assert 'accounts.google.com' in resp.headers['Location']
     assert 'client_id=client-id-123' in resp.headers['Location']
+
+
+def test_haversine_distance():
+    # Distance between Bangalore (12.9716, 77.5946) and nearby point
+    d = app_mod.haversine_distance(12.9716, 77.5946, 12.9720, 77.5950)
+    assert d is not None
+    assert d >= 0
+
+
+def test_get_nearby_hospitals_osm_fallback(monkeypatch):
+    class DummyPlacesResp:
+        def json(self):
+            return {'results': [], 'status': 'ZERO_RESULTS'}
+
+    class DummyOSMResp:
+        status_code = 200
+        def json(self):
+            return {
+                'elements': [
+                    {
+                        'lat': 12.92, 'lon': 77.58,
+                        'tags': {'name': 'OSM Pet Care Clinic', 'addr:street': 'MG Road'}
+                    }
+                ]
+            }
+
+    def fake_get(url, params=None, timeout=None):
+        return DummyPlacesResp()
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        return DummyOSMResp()
+
+    monkeypatch.setattr(app_mod, 'requests', type('R', (), {'get': fake_get, 'post': fake_post}))
+    res = app_mod.get_nearby_hospitals(12.9716, 77.5946)
+    assert isinstance(res, list)
+    assert len(res) == 1
+    assert res[0]['name'] == 'OSM Pet Care Clinic'
+    assert res[0]['distance_km'] is not None
+
+
+def test_api_nearby_vets_requires_login():
+    c = app_mod.app.test_client()
+    resp = c.get('/api/nearby-vets?lat=12.97&lon=77.59')
+    assert resp.status_code == 401

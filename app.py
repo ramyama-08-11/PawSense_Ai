@@ -1300,12 +1300,13 @@ def api_nearby_vets():
         try:
             forwarded = request.headers.get('X-Forwarded-For')
             client_ip = forwarded.split(',')[0].strip() if forwarded else request.remote_addr
-            if client_ip and client_ip not in ('127.0.0.1', '::1', 'localhost'):
-                ip_resp = requests.get(f"https://ipapi.co/{client_ip}/json/", timeout=3)
-                if ip_resp.status_code == 200:
-                    ip_data = ip_resp.json()
-                    lat = ip_data.get('latitude')
-                    lon = ip_data.get('longitude')
+            endpoint = f"http://ip-api.com/json/{client_ip}" if (client_ip and client_ip not in ('127.0.0.1', '::1', 'localhost')) else "http://ip-api.com/json/"
+            ip_resp = requests.get(endpoint, timeout=4)
+            if ip_resp.status_code == 200:
+                ip_data = ip_resp.json()
+                if ip_data.get('status') == 'success' or ip_data.get('lat'):
+                    lat = ip_data.get('lat')
+                    lon = ip_data.get('lon')
         except Exception:
             pass
 
