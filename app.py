@@ -249,6 +249,15 @@ def extract_model_response_text(response):
     return "I’m ready to help, but I didn’t receive a meaningful reply from the AI. Please try again or rephrase your question."
 
 
+@app.errorhandler(404)
+def not_found(e):
+    if request.path in ('/api/index', '/api/index.py', '/api'):
+        return redirect(url_for('index'))
+    if 'user_id' not in session:
+        return render_template('login.html'), 200
+    return redirect(url_for('index'))
+
+
 @app.route('/')
 def index():
     if 'user_id' not in session:
