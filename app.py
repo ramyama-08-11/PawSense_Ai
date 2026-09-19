@@ -39,7 +39,7 @@ try:
 except Exception:
     # flask-cors not installed in this environment; proceed without CORS
     pass
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', secrets.token_hex(16))
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'pawsense-session-secret-key-production-2026')
 
 # Detect Vercel / serverless environment
 IS_VERCEL = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
@@ -96,6 +96,22 @@ with app.app_context():
         db.create_all()
     except Exception as e:
         print(f"Warning: db.create_all() failed: {e}")
+    # Seed default user accounts so logins work on fresh/serverless deployments
+    try:
+        SEED_USERS = {
+            'byn': 'scrypt:32768:8:1$EjQsrgEFB5jvUc2Z$cc1343c876f765d26c7960e5d51ff41a807f9d69871a040757b1c89431317124bb10caf3efbf39c6b0b12513dbede73e3db885d5f5f74f38814ac8ba93304274',
+            'byn2811': 'scrypt:32768:8:1$b62szJupxBBw0xad$a59d8b89a1cf10d63b39564cb54d33ca84fd9419ed80e140e33b197dc62e7292f02f261c8bf94bb67bea0b82c14771e37e0213c77ef5e0e4d46d90588405b17c',
+            'ramyama457@gmail.com': 'scrypt:32768:8:1$RTeYhFma7CYUMPmj$6b8258376edb2c3fc683148c93d6ebe80916a644b7772dda2ab6f96607548d7bed532b81526e7b38d0dd1863580c6930a27d7acefdf7c6e947397e7fe06c6554',
+            'tester': 'scrypt:32768:8:1$uVBAaIxotLw9M1cI$170d250c62c84075a9a618645a106496ab0e3086c6da3a3ff6d51802908b909112201a1e44cb6db9843e30f2af09130820c223303544ae958c5b0ae569605327',
+            'petuser123': 'scrypt:32768:8:1$7wmf4FtcNx9X4Jdl$3f00f87339b0fe82407492f4e90810229b031cd35e12bbdf168e0e3eab38a04ab2eda8c3da8879dd7c8a9e00a98187f669a553e28754554aa647c642cd9b7066',
+        }
+        for uname, phash in SEED_USERS.items():
+            if not User.query.filter(func.lower(User.username) == uname.lower()).first():
+                db.session.add(User(username=uname, password_hash=phash))
+                db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"Warning: seed users initialization error: {e}")
     # Ensure DB columns added by recent model changes exist (simple runtime migration)
     try:
         from sqlalchemy import text
@@ -447,7 +463,9 @@ def login():
             session['user_id'] = user.id
             return redirect(url_for('index'))
 
-        return render_template('login.html', error="Invalid username or password")
+        if not user:
+            return render_template('login.html', error="Account not found. Please click 'Sign up here' below to create your account.")
+        return render_template('login.html', error="Invalid password. Please try again.")
 
     return render_template('login.html', error=request.args.get('error'))
 
