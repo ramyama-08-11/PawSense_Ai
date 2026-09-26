@@ -204,22 +204,23 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
 
 def get_nearby_hospitals(lat, lon):
-    """Query Google Places, OpenStreetMap Nominatim, or Gemini AI for veterinary hospitals near lat,lon.
-    Returns a list of dicts with name, address, lat, lng, rating, phone, distance_km, specialty, and navigation links.
+    """Query Google Places or OpenStreetMap for veterinary hospitals near lat,lon.
+    Returns a list of dicts with name, address, lat, lng, rating, distance_km, and navigation links.
     """
+    key = GOOGLE_SERVER_KEY or genai_api_key or os.getenv("GOOGLE_API_KEY")
     results = []
 
-    # 1. Try Google Places Nearby Search ONLY if GOOGLE_SERVER_KEY is explicitly configured
-    if GOOGLE_SERVER_KEY:
+    # 1. Try Google Places Nearby Search if key is available
+    if key:
         url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
         params = {
             'location': f"{lat},{lon}",
             'rankby': 'distance',
             'type': 'veterinary_care',
-            'key': GOOGLE_SERVER_KEY
+            'key': key
         }
         try:
-            resp = requests.get(url, params=params, timeout=4)
+            resp = requests.get(url, params=params, timeout=5)
             data = resp.json()
             for r in data.get('results', [])[:10]:
                 r_lat = r.get('geometry', {}).get('location', {}).get('lat')
@@ -232,125 +233,84 @@ def get_nearby_hospitals(lat, lon):
                     'lat': r_lat,
                     'lng': r_lng,
                     'rating': r.get('rating'),
-                    'phone': None,
-                    'specialty': 'Veterinary Care & Clinic',
                     'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
                     'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
                     'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
                 })
-        except Exception as e:
-            print(f"Google Places search error: {e}")
+            
+            # Fallback to hospital+keyword if no veterinary_care results
+            if not results and data.get('status') == 'OK':
+                params2 = {
+                    'location': f"{lat},{lon}",
+                    'rankby': 'distance',
+                    'type': 'hospital',
+                    'keyword': 'veterinary',
+                    'key': key
+                }
+                resp2 = requests.get(url, params=params2, timeout=5)
+                data2 = resp2.json()
+                for r in data2.get('results', [])[:10]:
+                    r_lat = r.get('geometry', {}).get('location', {}).get('lat')
+                    r_lng = r.get('geometry', {}).get('location', {}).get('lng')
+                    q_name = urllib.parse.quote(str(r.get('name') or ''))
+                    q_addr = urllib.parse.quote(str(r.get('vicinity') or ''))
+                    results.append({
+                        'name': r.get('name'),
+                        'address': r.get('vicinity') or '',
+                        'lat': r_lat,
+                        'lng': r_lng,
+                        'rating': r.get('rating'),
+                        'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
+                        'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
+                        'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
+                    })
+        except Exception:
+            pass
 
-    # 2. Fast OpenStreetMap Nominatim Search
-    try:
-        delta = 0.22  # ~25 km area around user
-        url = f"https://nominatim.openstreetmap.org/search?format=json&q=veterinary&bounded=0&viewbox={lon-delta},{lat+delta},{lon+delta},{lat-delta}&limit=10"
-        headers = {"User-Agent": "PawSense-App/1.0 (https://pawsense.ai; locator)"}
-        resp = requests.get(url, headers=headers, timeout=4)
-        if resp.status_code == 200:
-            for item in resp.json():
-                raw_name = item.get("name") or item.get("display_name", "").split(",")[0]
-                addr = item.get("display_name", "")
-                parts = [p.strip() for p in addr.split(",") if p.strip()]
-                name = raw_name if raw_name and len(raw_name) > 3 else (parts[0] if parts else "Veterinary Clinic")
-                addr_short = ", ".join(parts[:4])
-                r_lat = float(item.get("lat"))
-                r_lng = float(item.get("lon"))
-                results.append({
-                    "name": name,
-                    "address": addr_short,
-                    "phone": None,
-                    "lat": r_lat,
-                    "lng": r_lng,
-                    "rating": None,
-                    "specialty": "Veterinary Healthcare",
-                    "distance_km": haversine_distance(lat, lon, r_lat, r_lng),
-                    "directions_url": f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}",
-                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(name + ' ' + addr_short)}"
-                })
-    except Exception as e:
-        print(f"Nominatim lookup error: {e}")
+    # 2. Free OpenStreetMap Overpass API fallback if Google Places returned no results or is unavailable/unauthorized
+    post_fn = getattr(requests, 'post', None)
+    if not results and callable(post_fn):
+        try:
+            osm_query = f"""
+            [out:json][timeout:8];
+            (
+              node["amenity"="veterinary"](around:20000, {lat}, {lon});
+              way["amenity"="veterinary"](around:20000, {lat}, {lon});
+            );
+            out center 12;
+            """
+            headers = {"User-Agent": "PawSense-App/1.0 (veterinary-locator)"}
+            resp = post_fn("https://overpass-api.de/api/interpreter", data={"data": osm_query}, headers=headers, timeout=8)
+            if resp.status_code == 200:
+                osm_data = resp.json()
+                for el in osm_data.get('elements', []):
+                    tags = el.get('tags', {})
+                    r_lat = el.get('lat') or (el.get('center') or {}).get('lat')
+                    r_lng = el.get('lon') or (el.get('center') or {}).get('lon')
+                    name = tags.get('name') or tags.get('name:en') or tags.get('operator') or 'Veterinary Clinic'
+                    addr_parts = [tags.get(k) for k in ['addr:housenumber', 'addr:street', 'addr:suburb', 'addr:city'] if tags.get(k)]
+                    address = ', '.join(addr_parts) if addr_parts else tags.get('address') or ''
+                    phone = tags.get('phone') or tags.get('contact:phone') or None
+                    q_name = urllib.parse.quote(name)
+                    q_addr = urllib.parse.quote(address)
+                    results.append({
+                        'name': name,
+                        'address': address,
+                        'phone': phone,
+                        'lat': r_lat,
+                        'lng': r_lng,
+                        'rating': None,
+                        'distance_km': haversine_distance(lat, lon, r_lat, r_lng) if (r_lat and r_lng) else None,
+                        'directions_url': f"https://www.google.com/maps/dir/?api=1&destination={r_lat},{r_lng}" if (r_lat and r_lng) else None,
+                        'maps_url': f"https://www.google.com/maps/search/?api=1&query={q_name}+{q_addr}"
+                    })
+                # Sort by distance
+                results.sort(key=lambda x: x.get('distance_km') or 999999)
+                results = results[:10]
+        except Exception:
+            pass
 
-    # 3. AI Intelligent Hospital Finder via Gemini (when results < 4)
-    # Gemini has extensive verified knowledge of veterinary hospitals, 24/7 emergency centers, and contact numbers
-    if len(results) < 4:
-        gemini_key = get_gemini_api_key()
-        if gemini_key:
-            try:
-                city_hint = ""
-                try:
-                    rev_url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
-                    rev_resp = requests.get(rev_url, headers={"User-Agent": "PawSense/1.0"}, timeout=3)
-                    if rev_resp.status_code == 200:
-                        addr_info = rev_resp.json().get('address', {})
-                        city = addr_info.get('city') or addr_info.get('town') or addr_info.get('suburb') or addr_info.get('state_district') or addr_info.get('state')
-                        if city:
-                            city_hint = f" near {city}"
-                except Exception:
-                    pass
-
-                prompt = f"""
-Find 5 to 6 real, well-known veterinary hospitals, animal healthcare clinics, and 24/7 pet emergency hospitals near coordinates ({lat}, {lon}){city_hint}.
-Return a JSON array of objects with these exact keys:
-- "name": Official name of the veterinary hospital or clinic
-- "address": Street address or locality/area
-- "phone": Contact phone number if known, otherwise null
-- "rating": Average rating number (e.g. 4.6)
-- "lat": Approximate latitude number
-- "lng": Approximate longitude number
-- "specialty": Highlights of services (e.g. "24/7 Emergency & Critical Care", "Vaccinations, Surgery & Diagnostics")
-
-Return ONLY the raw JSON array. Do not wrap in markdown or backticks.
-"""
-                for m_name in ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-pro"]:
-                    try:
-                        m = genai.GenerativeModel(m_name)
-                        ai_resp = m.generate_content(prompt)
-                        ai_text = ai_resp.text.strip()
-                        if ai_text.startswith("```"):
-                            ai_text = ai_text.strip("`").strip()
-                            if ai_text.lower().startswith("json"):
-                                ai_text = ai_text[4:].strip()
-                        ai_data = json.loads(ai_text)
-                        if isinstance(ai_data, list):
-                            for h in ai_data:
-                                h_name = h.get("name")
-                                if not h_name:
-                                    continue
-                                h_lat = float(h.get("lat") or lat)
-                                h_lng = float(h.get("lng") or lon)
-                                h_addr = h.get("address") or ""
-                                dist = haversine_distance(lat, lon, h_lat, h_lng)
-                                results.append({
-                                    "name": h_name,
-                                    "address": h_addr,
-                                    "phone": h.get("phone"),
-                                    "rating": h.get("rating"),
-                                    "specialty": h.get("specialty") or "Veterinary Care & Emergency",
-                                    "lat": h_lat,
-                                    "lng": h_lng,
-                                    "distance_km": dist,
-                                    "directions_url": f"https://www.google.com/maps/dir/?api=1&destination={h_lat},{h_lng}",
-                                    "maps_url": f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(h_name + ' ' + h_addr)}"
-                                })
-                            break
-                    except Exception as ai_err:
-                        print(f"Gemini vet locator error with {m_name}: {ai_err}")
-                        continue
-            except Exception as e:
-                print(f"AI hospital search error: {e}")
-
-    # Deduplicate by normalized name and sort by proximity
-    seen_names = set()
-    unique_results = []
-    for r in results:
-        norm = (r.get("name") or "").lower().strip()
-        if norm and norm not in seen_names:
-            seen_names.add(norm)
-            unique_results.append(r)
-
-    unique_results.sort(key=lambda x: x.get('distance_km') if x.get('distance_km') is not None else 999999)
-    return unique_results[:10]
+    return results
 
 
 def generate_svg_data_url(text, title='Diet Plan'):
@@ -881,11 +841,7 @@ def chat():
     custom_instructions = request.form.get('custom_instructions', '')
     
     # System Instruction
-    system_instruction = (
-        f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\n"
-        f"CRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
-        "VETERINARY HOSPITALS & CLINICS: Whenever the user asks for nearby veterinary hospitals, clinics, emergency care, or pet doctors, ALWAYS provide a detailed, formatted list with actual hospital/clinic names, localities/addresses, contact numbers (if known), and emergency guidance. Never respond with only a generic search link.\n\n"
-    )
+    system_instruction = f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\nCRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
     if custom_instructions:
         system_instruction += f"USER PREFERENCES: {custom_instructions}\n\n"
 
@@ -1485,8 +1441,7 @@ def api_nearby_vets():
             pass
 
     if not lat or not lon:
-        lat = 12.9716
-        lon = 77.5946
+        return jsonify({'error': 'Latitude and longitude are required. Please enable location services in your browser.'}), 400
 
     try:
         lat = float(lat)
