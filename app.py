@@ -114,7 +114,31 @@ GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://127.0.0.1:5000/au
 # alias used in code
 api_key = genai_api_key
 if genai_api_key:
-    genai.configure(api_key=genai_api_key)
+    try:
+        genai.configure(api_key=genai_api_key)
+    except Exception:
+        pass
+
+
+def get_gemini_api_key():
+    """Dynamically read the latest GOOGLE_API_KEY from .env and configure genai if changed."""
+    global api_key, genai_api_key
+    try:
+        load_dotenv(override=True)
+    except Exception:
+        pass
+    k = os.getenv("GOOGLE_API_KEY")
+    if k:
+        k = k.strip().strip("'\"")
+    if k and k != genai_api_key:
+        genai_api_key = k
+        api_key = k
+        try:
+            genai.configure(api_key=k)
+        except Exception as e:
+            print(f"Warning: genai.configure failed with key: {e}")
+    return k or genai_api_key or api_key
+
 
 with app.app_context():
     try:
@@ -823,29 +847,49 @@ def chat():
 
     # Generate response with Gemini
     response_content = ""
+    active_key = get_gemini_api_key()
     try:
-        if not api_key:
+        if not active_key:
             response_content = "To use the AI, please add a GOOGLE_API_KEY to your .env file."
         else:
-            model_name = "gemini-2.5-flash"
-            model = genai.GenerativeModel(model_name)
-            
             prompt_parts = [system_instruction + content]
-            
             if image_path:
                 import PIL.Image
                 img = PIL.Image.open(os.path.join(app.root_path, image_path))
                 prompt_parts.append(img)
-                
-            response = model.generate_content(prompt_parts)
-            response_content = extract_model_response_text(response)
+
+            model_candidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+            response = None
+            last_err = None
+            for m_name in model_candidates:
+                try:
+                    model = genai.GenerativeModel(m_name)
+                    response = model.generate_content(prompt_parts)
+                    break
+                except Exception as m_err:
+                    last_err = m_err
+                    err_str = str(m_err)
+                    if "leaked" in err_str.lower() or "PERMISSION_DENIED" in err_str or "API_KEY_INVALID" in err_str:
+                        raise m_err
+                    continue
+
+            if response is not None:
+                response_content = extract_model_response_text(response)
+            elif last_err:
+                raise last_err
     except Exception as e:
         print(f"Error generating response: {e}")
-        try:
-            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-            response_content = f"API Error: {str(e)}\n\nGood news though, I found the models your key supports! Please tell my developer (Antigravity) to use one of these: {', '.join(available_models)}"
-        except Exception as inner_e:
-            response_content = f"I'm sorry, I encountered an error: {str(e)}"
+        err_str = str(e)
+        if "leaked" in err_str.lower():
+            response_content = "⚠️ Google API Error: Your API key was reported as leaked/revoked by Google. Please generate a fresh key from Google AI Studio (https://aistudio.google.com/app/apikey) and update your .env file."
+        elif "API_KEY_INVALID" in err_str:
+            response_content = "⚠️ Google API Error: The GOOGLE_API_KEY in your .env file is invalid. Please verify it at https://aistudio.google.com/app/apikey."
+        else:
+            try:
+                available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                response_content = f"API Error: {str(e)}\n\nAvailable models: {', '.join(available_models)}"
+            except Exception:
+                response_content = f"I'm sorry, I encountered an error: {str(e)}"
 
     # Save model message
     model_msg = Message(session_id=chat_session.id, role='model', content=response_content)
@@ -1297,11 +1341,9 @@ def scan():
         w, h = img.size
         scan_text = f"Image received ({w}x{h})."
         # Try AI analysis if key is available
-        if api_key:
+        active_key = get_gemini_api_key()
+        if active_key:
             try:
-                model_name = "gemini-2.5-flash"
-                model = genai.GenerativeModel(model_name)
-
                 # Instruct Gemini to analyze the image and return JSON only.
                 system_instruction = (
                     "You are Pawsense, an expert veterinary assistant. Analyze the attached pet image "
@@ -1314,10 +1356,17 @@ def scan():
                     "Output ONLY valid JSON. If uncertain, make conservative suggestions and set lower confidence values."
                 )
 
-                prompt_parts = [system_instruction]
-                prompt_parts.append(img)
-                response = model.generate_content(prompt_parts)
-                scan_text = response.text
+                prompt_parts = [system_instruction, img]
+                for m_name in ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-pro"]:
+                    try:
+                        model = genai.GenerativeModel(m_name)
+                        response = model.generate_content(prompt_parts)
+                        scan_text = response.text
+                        break
+                    except Exception as m_err:
+                        if "leaked" in str(m_err).lower() or "PERMISSION_DENIED" in str(m_err):
+                            raise m_err
+                        continue
 
                 # Attempt to parse JSON from the model output
                 scan_analysis = None
