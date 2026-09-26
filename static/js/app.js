@@ -905,24 +905,103 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Voice Input: record audio and send it to backend for Google Speech-to-Text conversion.
+    // Voice Input: Web Speech Recognition (native, zero latency, works on Vercel/HTTPS)
+    // with MediaRecorder + Gemini 2.5 Flash audio transcription fallback
     const voiceBtn = document.getElementById('voice-btn');
     if (voiceBtn) {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
-            voiceBtn.style.display = 'none';
-        } else {
-            let mediaRecorder = null;
-            let audioStream = null;
-            let audioChunks = [];
-            let isRecording = false;
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let isRecording = false;
+        let recognition = null;
+        let mediaRecorder = null;
+        let audioStream = null;
+        let audioChunks = [];
 
-            function setVoiceState(recording) {
-                isRecording = recording;
-                voiceBtn.classList.toggle('recording', recording);
-                voiceBtn.title = recording ? 'Stop recording' : 'Record voice message';
-                messageInput.placeholder = recording ? 'Recording… speak now' : 'Ask anything about your pet…';
+        function setVoiceState(recording) {
+            isRecording = recording;
+            voiceBtn.classList.toggle('recording', recording);
+            voiceBtn.title = recording ? 'Listening… click to stop' : 'Voice Input';
+            if (recording) {
+                messageInput.placeholder = '🎙️ Listening… speak now';
+            } else {
+                messageInput.placeholder = 'Ask anything about your pet…';
             }
+        }
 
+        function getSpeechLang() {
+            const langSel = document.getElementById('language-select');
+            const val = langSel ? langSel.value : 'English';
+            if (val === 'Hindi') return 'hi-IN';
+            if (val === 'Kannada') return 'kn-IN';
+            return 'en-US';
+        }
+
+        if (SpeechRecognition) {
+            // ── BROWSER NATIVE SPEECH RECOGNITION (Chrome, Edge, Safari, Android, iOS) ──
+            voiceBtn.addEventListener('click', () => {
+                if (isRecording) {
+                    if (recognition) {
+                        try { recognition.stop(); } catch (e) {}
+                    }
+                    setVoiceState(false);
+                    return;
+                }
+
+                try {
+                    recognition = new SpeechRecognition();
+                    recognition.lang = getSpeechLang();
+                    recognition.interimResults = true;
+                    recognition.continuous = false;
+                    recognition.maxAlternatives = 1;
+
+                    let finalTranscript = '';
+
+                    recognition.onstart = () => {
+                        setVoiceState(true);
+                    };
+
+                    recognition.onresult = (event) => {
+                        let interim = '';
+                        for (let i = event.resultIndex; i < event.results.length; ++i) {
+                            if (event.results[i].isFinal) {
+                                finalTranscript += event.results[i][0].transcript;
+                            } else {
+                                interim += event.results[i][0].transcript;
+                            }
+                        }
+                        const text = (finalTranscript + ' ' + interim).trim();
+                        if (text) {
+                            messageInput.value = text;
+                            messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+                            // Enable send button
+                            const sendBtn = document.getElementById('send-btn');
+                            if (sendBtn) sendBtn.disabled = false;
+                        }
+                    };
+
+                    recognition.onerror = (event) => {
+                        console.warn('Speech recognition warning:', event.error);
+                        setVoiceState(false);
+                        if (event.error === 'not-allowed') {
+                            alert('Microphone permission was denied. Please allow microphone access in your browser address bar.');
+                        }
+                    };
+
+                    recognition.onend = () => {
+                        setVoiceState(false);
+                        const sendBtn = document.getElementById('send-btn');
+                        if (sendBtn && messageInput.value.trim().length > 0) {
+                            sendBtn.disabled = false;
+                        }
+                    };
+
+                    recognition.start();
+                } catch (err) {
+                    console.error('Speech recognition error:', err);
+                    setVoiceState(false);
+                }
+            });
+        } else if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder) {
+            // ── FALLBACK: MediaRecorder + Backend Gemini Audio Transcribe ──
             async function submitRecordedAudio(blob) {
                 const formData = new FormData();
                 const audioFile = new File([blob], `voice-${Date.now()}.webm`, { type: blob.type || 'audio/webm' });
@@ -937,7 +1016,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!response.ok) {
                     let details = '';
-                    try { details = await response.text(); } catch (err) { /* ignore */ }
+                    try { details = await response.text(); } catch (err) {}
                     throw new Error(details || 'Audio transcription failed');
                 }
 
@@ -949,9 +1028,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 messageInput.value = data.transcript;
                 messageInput.dispatchEvent(new Event('input', { bubbles: true }));
                 messageInput.placeholder = 'Ask anything about your pet…';
-                if (chatForm) {
-                    chatForm.requestSubmit();
-                }
+                const sendBtn = document.getElementById('send-btn');
+                if (sendBtn) sendBtn.disabled = false;
             }
 
             voiceBtn.addEventListener('click', async () => {
@@ -971,9 +1049,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     audioChunks = [];
 
                     mediaRecorder.ondataavailable = (event) => {
-                        if (event.data && event.data.size > 0) {
-                            audioChunks.push(event.data);
-                        }
+                        if (event.data && event.data.size > 0) audioChunks.push(event.data);
                     };
 
                     mediaRecorder.onstop = async () => {
@@ -983,17 +1059,12 @@ document.addEventListener('DOMContentLoaded', () => {
                             audioStream = null;
                         }
                         setVoiceState(false);
-
                         try {
                             await submitRecordedAudio(blob);
                         } catch (error) {
-                            const message = (error && error.message) ? error.message : String(error);
                             console.error('Voice transcription error:', error);
-                            alert('Voice transcription failed. Please check microphone access and try again.');
+                            alert('Voice transcription failed. Please speak clearly or type your message.');
                             messageInput.placeholder = 'Ask anything about your pet…';
-                            if (messageInput.value.trim() === '') {
-                                messageInput.value = '';
-                            }
                         }
                     };
 
@@ -1001,9 +1072,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     mediaRecorder.start();
                 } catch (error) {
                     console.error('Mic access error:', error);
-                    alert('Microphone permission is required to record audio. Please allow it and try again.');
+                    alert('Microphone permission is required. Please allow it in your browser settings.');
                 }
             });
+        } else {
+            voiceBtn.style.display = 'none';
         }
     }
 

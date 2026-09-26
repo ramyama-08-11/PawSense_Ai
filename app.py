@@ -696,60 +696,74 @@ def transcribe_audio_route():
         return jsonify({'error': 'Audio file is empty'}), 400
 
     mime_type = (audio_file.mimetype or request.mimetype or 'audio/webm').lower()
-    api_key = GOOGLE_SERVER_KEY or genai_api_key or os.getenv('GOOGLE_API_KEY')
-    if not api_key:
-        return jsonify({'error': 'Speech-to-text is not configured because no Google key is available'}), 500
+    if ';' in mime_type:
+        mime_type = mime_type.split(';')[0].strip()
 
-    try:
-        encoding_map = {
-            'audio/webm': 'WEBM_OPUS',
-            'audio/webm;codecs=opus': 'WEBM_OPUS',
-            'audio/ogg': 'OGG_OPUS',
-            'audio/ogg;codecs=opus': 'OGG_OPUS',
-            'audio/mpeg': 'MP3',
-            'audio/mp3': 'MP3',
-            'audio/mp4': 'MP3',
-            'audio/wav': 'LINEAR16',
-            'audio/x-wav': 'LINEAR16'
-        }
-        encoding = encoding_map.get(mime_type, 'WEBM_OPUS')
-        sample_rate = 48000 if encoding in {'WEBM_OPUS', 'OGG_OPUS'} else 44100 if encoding == 'MP3' else 16000
-        payload = {
-            'config': {
-                'encoding': encoding,
-                'sampleRateHertz': sample_rate,
-                'languageCode': 'en-US',
-                'enableAutomaticPunctuation': True,
-            },
-            'audio': {'content': base64.b64encode(audio_bytes).decode('utf-8')}
-        }
-        response = requests.post(
-            'https://speech.googleapis.com/v1/speech:recognize',
-            params={'key': api_key},
-            json=payload,
-            timeout=60,
-        )
-        if response.status_code >= 400:
-            error_text = response.text
-            return jsonify({'error': f'Speech service failed: {error_text}'}), 500
+    # 1. Primary: Gemini Multimodal audio transcription (uses user's GOOGLE_API_KEY from AI Studio)
+    active_key = get_gemini_api_key()
+    if active_key:
+        try:
+            for m_name in ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite"]:
+                try:
+                    m = genai.GenerativeModel(m_name)
+                    prompt = (
+                        "Transcribe the spoken words in this audio clip into clean plain text for a pet assistant message. "
+                        "Return ONLY the exact transcribed text, nothing else."
+                    )
+                    resp = m.generate_content([
+                        prompt,
+                        {"mime_type": mime_type if mime_type else "audio/webm", "data": audio_bytes}
+                    ])
+                    transcript = resp.text.strip() if (resp and resp.text) else ""
+                    if transcript:
+                        return jsonify({'transcript': transcript})
+                except Exception as m_err:
+                    print(f"Gemini audio transcription with {m_name} failed: {m_err}")
+                    continue
+        except Exception as e:
+            print(f"Gemini audio transcription error: {e}")
 
-        data = response.json()
-        results = data.get('results', [])
-        transcript = ''
-        for result in results:
-            alternatives = result.get('alternatives', [])
-            if alternatives:
-                transcript = alternatives[0].get('transcript', '').strip()
-                if transcript:
-                    break
+    # 2. Secondary fallback: Google Cloud Speech API (if GOOGLE_SERVER_KEY is explicitly set)
+    if GOOGLE_SERVER_KEY:
+        try:
+            encoding_map = {
+                'audio/webm': 'WEBM_OPUS',
+                'audio/ogg': 'OGG_OPUS',
+                'audio/mpeg': 'MP3',
+                'audio/mp3': 'MP3',
+                'audio/mp4': 'MP3',
+                'audio/wav': 'LINEAR16',
+                'audio/x-wav': 'LINEAR16'
+            }
+            encoding = encoding_map.get(mime_type, 'WEBM_OPUS')
+            sample_rate = 48000 if encoding in {'WEBM_OPUS', 'OGG_OPUS'} else 44100 if encoding == 'MP3' else 16000
+            payload = {
+                'config': {
+                    'encoding': encoding,
+                    'sampleRateHertz': sample_rate,
+                    'languageCode': 'en-US',
+                    'enableAutomaticPunctuation': True,
+                },
+                'audio': {'content': base64.b64encode(audio_bytes).decode('utf-8')}
+            }
+            response = requests.post(
+                'https://speech.googleapis.com/v1/speech:recognize',
+                params={'key': GOOGLE_SERVER_KEY},
+                json=payload,
+                timeout=30,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                for result in data.get('results', []):
+                    alternatives = result.get('alternatives', [])
+                    if alternatives:
+                        transcript = alternatives[0].get('transcript', '').strip()
+                        if transcript:
+                            return jsonify({'transcript': transcript})
+        except Exception as exc:
+            print(f'Google Cloud Speech API failed: {exc}')
 
-        if not transcript:
-            return jsonify({'error': 'No speech was recognized in the audio clip'}), 422
-
-        return jsonify({'transcript': transcript})
-    except Exception as exc:
-        print(f'Error transcribing audio: {exc}')
-        return jsonify({'error': f'Audio transcription failed: {str(exc)}'}), 500
+    return jsonify({'error': 'No speech recognized. Please speak into the microphone or type your message.'}), 422
 
 
 @app.route('/api/chat', methods=['POST'])
