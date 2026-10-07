@@ -32,16 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let selectedFileCaptions = []; // per-image captions
     const inputWrapper = document.getElementById('input-wrapper');
 
-    // Small UI hint for paste/drag support
-    if (inputWrapper) {
-        const hint = document.createElement('div');
-        hint.id = 'paste-drag-hint';
-        hint.style.fontSize = '0.80rem';
-        hint.style.color = 'var(--text-secondary)';
-        hint.style.marginTop = '6px';
-        hint.textContent = 'Tip: Paste images (Ctrl+V) or drag files into the chat to upload.';
-        inputWrapper.appendChild(hint);
-    }
+
 
     // =====================================================================
     // ANIMATED CANVAS BACKGROUND
