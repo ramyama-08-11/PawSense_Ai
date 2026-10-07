@@ -111,6 +111,9 @@ GOOGLE_BROWSER_KEY = os.getenv("GOOGLE_BROWSER_KEY")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = os.getenv("GOOGLE_REDIRECT_URI", "http://127.0.0.1:5000/auth/google/callback")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET")
+GITHUB_REDIRECT_URI = os.getenv("GITHUB_REDIRECT_URI", "http://127.0.0.1:5000/auth/github/callback")
 # alias used in code
 api_key = genai_api_key
 if genai_api_key:
@@ -440,28 +443,29 @@ def signup():
 
 @app.route('/auth/google/login')
 def google_oauth_login():
-    if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        return render_template('login.html', error='Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to your .env file.')
+    if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET:
+        state = secrets.token_urlsafe(16)
+        session['google_oauth_state'] = state
+        params = {
+            'client_id': GOOGLE_CLIENT_ID,
+            'redirect_uri': GOOGLE_REDIRECT_URI,
+            'response_type': 'code',
+            'scope': 'openid email profile',
+            'access_type': 'offline',
+            'prompt': 'select_account',
+            'state': state,
+        }
+        google_auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(params)
+        return redirect(google_auth_url)
 
-    state = secrets.token_urlsafe(16)
-    session['google_oauth_state'] = state
-    params = {
-        'client_id': GOOGLE_CLIENT_ID,
-        'redirect_uri': GOOGLE_REDIRECT_URI,
-        'response_type': 'code',
-        'scope': 'openid email profile',
-        'access_type': 'offline',
-        'prompt': 'select_account',
-        'state': state,
-    }
-    google_auth_url = 'https://accounts.google.com/o/oauth2/v2/auth?' + urllib.parse.urlencode(params)
-    return redirect(google_auth_url)
+    # If Google OAuth is not configured with client ID/secret, fall back to mock social login
+    return redirect(url_for('mock_social_login', provider='google'))
 
 
 @app.route('/auth/google/callback')
 def google_oauth_callback():
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
-        return render_template('login.html', error='Google login is not configured yet. Add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET to your .env file.')
+        return redirect(url_for('mock_social_login', provider='google'))
 
     error = request.args.get('error')
     if error:
@@ -505,6 +509,93 @@ def google_oauth_callback():
     user = User.query.filter(func.lower(User.username) == username).first()
     if not user:
         user = User(username=username, password_hash=generate_password_hash(f"google-oauth::{secrets.token_urlsafe(32)}"))
+        db.session.add(user)
+    db.session.commit()
+    session['user_id'] = user.id
+    return redirect(url_for('index'))
+
+
+@app.route('/auth/github/login')
+def github_oauth_login():
+    if GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET:
+        state = secrets.token_urlsafe(16)
+        session['github_oauth_state'] = state
+        params = {
+            'client_id': GITHUB_CLIENT_ID,
+            'redirect_uri': GITHUB_REDIRECT_URI,
+            'scope': 'read:user user:email',
+            'state': state,
+        }
+        github_auth_url = 'https://github.com/login/oauth/authorize?' + urllib.parse.urlencode(params)
+        return redirect(github_auth_url)
+
+    # If GitHub OAuth is not configured with client ID/secret, fall back to mock social login
+    return redirect(url_for('mock_social_login', provider='github'))
+
+
+@app.route('/auth/github/callback')
+def github_oauth_callback():
+    if not GITHUB_CLIENT_ID or not GITHUB_CLIENT_SECRET:
+        return redirect(url_for('mock_social_login', provider='github'))
+
+    error = request.args.get('error')
+    if error:
+        return render_template('login.html', error='GitHub login was cancelled or denied.')
+
+    code = request.args.get('code')
+    if not code:
+        return render_template('login.html', error='GitHub login did not return an authorization code.')
+
+    expected_state = session.pop('github_oauth_state', None)
+    if request.args.get('state') and expected_state and request.args.get('state') != expected_state:
+        return render_template('login.html', error='GitHub login state validation failed.')
+
+    token_response = requests.post(
+        'https://github.com/login/oauth/access_token',
+        headers={'Accept': 'application/json'},
+        data={
+            'code': code,
+            'client_id': GITHUB_CLIENT_ID,
+            'client_secret': GITHUB_CLIENT_SECRET,
+            'redirect_uri': GITHUB_REDIRECT_URI,
+        },
+        timeout=30,
+    )
+    token_data = token_response.json() if token_response.headers.get('Content-Type', '').startswith('application/json') else {}
+    access_token = token_data.get('access_token')
+    if not access_token:
+        return render_template('login.html', error='GitHub login failed during token exchange.')
+
+    user_response = requests.get(
+        'https://api.github.com/user',
+        headers={'Authorization': f'Bearer {access_token}', 'User-Agent': 'PawSense'},
+        timeout=30,
+    )
+    user_data = user_response.json() if user_response.headers.get('Content-Type', '').startswith('application/json') else {}
+    username_raw = (user_data.get('login') or user_data.get('email') or user_data.get('name') or '').strip()
+
+    if not username_raw:
+        emails_response = requests.get(
+            'https://api.github.com/user/emails',
+            headers={'Authorization': f'Bearer {access_token}', 'User-Agent': 'PawSense'},
+            timeout=30,
+        )
+        if emails_response.status_code == 200:
+            emails_data = emails_response.json() if emails_response.headers.get('Content-Type', '').startswith('application/json') else []
+            for em in emails_data:
+                if isinstance(em, dict) and em.get('primary'):
+                    username_raw = em.get('email')
+                    break
+            if not username_raw and emails_data and isinstance(emails_data[0], dict):
+                username_raw = emails_data[0].get('email')
+
+    if not username_raw:
+        return render_template('login.html', error='GitHub login did not return a valid username or email.')
+
+    username = normalize_username(username_raw)
+    user = User.query.filter(func.lower(User.username) == username).first()
+    if not user:
+        user = User(username=username, password_hash=generate_password_hash(f"github-oauth::{secrets.token_urlsafe(32)}"))
         db.session.add(user)
     db.session.commit()
     session['user_id'] = user.id

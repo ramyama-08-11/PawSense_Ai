@@ -44,27 +44,7 @@
         [data-theme="dark"] .input-with-icon input { background:rgba(255,255,255,.05); }
         .input-with-icon input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(59,130,246,.2); }
         .auth-btn { width:100%; margin-top:4px; }
-        .divider { text-align:center; position:relative; color:var(--text-secondary); font-size:.82rem; margin:20px 0; }
-        .divider::before,.divider::after { content:''; position:absolute; top:50%; width:calc(50% - 50px); height:1px; background:var(--border-color); }
-        .divider::before { left:0; } .divider::after { right:0; }
-        .social-btns { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:6px; margin-top:10px; }
-        .btn-social {
-            display:flex; align-items:center; justify-content:center; flex-direction:column; gap:3px;
-            aspect-ratio:1 / 1; min-height:60px; padding:8px;
-            border-radius:12px; border:none;
-            color:#fff; font-size:.78rem; font-weight:700; cursor:pointer;
-            transition:transform .2s, box-shadow .2s, opacity .2s;
-            text-decoration:none;
-            box-shadow:0 10px 22px rgba(15,23,42,.12);
-            text-align:center;
-        }
-        .btn-social i { width:20px; height:20px; display:flex; align-items:center; justify-content:center; font-size:.95rem; }
-        .btn-social span { display:block; line-height:1.1; letter-spacing:.02em; }
-        .btn-social:hover { transform:translateY(-1px); box-shadow:0 14px 28px rgba(15,23,42,.14); opacity:.98; }
-        .btn-google { background:linear-gradient(135deg,#ea4335,#fbbc05); }
-        .btn-facebook { background:linear-gradient(135deg,#1877f2,#0f5cd8); }
-        .btn-instagram { background:linear-gradient(135deg,#feda75,#d62976,#833ab4); }
-        .auth-footer { text-align:center; font-size:.87rem; color:var(--text-secondary); margin-top:20px; }
+        .auth-footer { text-align:center; font-size:.87rem; color:var(--text-secondary); margin-top:24px; }
         .auth-footer a { color:var(--accent); font-weight:600; text-decoration:none; }
         .auth-footer a:hover { text-decoration:underline; }
 
@@ -124,22 +104,6 @@
                     <i class="fas fa-sign-in-alt"></i> Sign In
                 </button>
             </form>
-
-            <div class="divider">or continue with</div>
-            <div class="social-btns">
-                <a href="/auth/google/login" class="btn-social btn-google">
-                    <i class="fab fa-google"></i>
-                    <span>Google</span>
-                </a>
-                <a href="/mock_social_login/facebook" class="btn-social btn-facebook">
-                    <i class="fab fa-facebook-f"></i>
-                    <span>Facebook</span>
-                </a>
-                <a href="/mock_social_login/instagram" class="btn-social btn-instagram">
-                    <i class="fab fa-instagram"></i>
-                    <span>Instagram</span>
-                </a>
-            </div>
 
             <p class="auth-footer">Don't have an account? <a href="/signup">Sign up here</a></p>
         </div>

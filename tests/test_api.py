@@ -204,6 +204,45 @@ def test_google_oauth_login_redirects_to_google_when_configured(monkeypatch):
     assert 'client_id=client-id-123' in resp.headers['Location']
 
 
+def test_google_oauth_login_redirects_to_mock_when_unconfigured(monkeypatch):
+    c = app_mod.app.test_client()
+    monkeypatch.setattr(app_mod, 'GOOGLE_CLIENT_ID', None)
+    monkeypatch.setattr(app_mod, 'GOOGLE_CLIENT_SECRET', None)
+
+    resp = c.get('/auth/google/login', follow_redirects=False)
+    assert resp.status_code == 302
+    assert '/mock_social_login/google' in resp.headers['Location']
+
+
+def test_github_oauth_login_redirects_to_mock_when_unconfigured(monkeypatch):
+    c = app_mod.app.test_client()
+    monkeypatch.setattr(app_mod, 'GITHUB_CLIENT_ID', None)
+    monkeypatch.setattr(app_mod, 'GITHUB_CLIENT_SECRET', None)
+
+    resp = c.get('/auth/github/login', follow_redirects=False)
+    assert resp.status_code == 302
+    assert '/mock_social_login/github' in resp.headers['Location']
+
+
+def test_github_oauth_login_redirects_to_github_when_configured(monkeypatch):
+    c = app_mod.app.test_client()
+    monkeypatch.setattr(app_mod, 'GITHUB_CLIENT_ID', 'gh-client-123')
+    monkeypatch.setattr(app_mod, 'GITHUB_CLIENT_SECRET', 'gh-secret-456')
+    monkeypatch.setattr(app_mod, 'GITHUB_REDIRECT_URI', 'http://127.0.0.1:5000/auth/github/callback')
+
+    resp = c.get('/auth/github/login', follow_redirects=False)
+    assert resp.status_code == 302
+    assert 'github.com/login/oauth/authorize' in resp.headers['Location']
+    assert 'client_id=gh-client-123' in resp.headers['Location']
+
+
+def test_mock_social_login_github_page():
+    c = app_mod.app.test_client()
+    resp = c.get('/mock_social_login/github')
+    assert resp.status_code == 200
+    assert b'GitHub' in resp.data
+
+
 def test_haversine_distance():
     # Distance between Bangalore (12.9716, 77.5946) and nearby point
     d = app_mod.haversine_distance(12.9716, 77.5946, 12.9720, 77.5950)

@@ -33,14 +33,7 @@
         [data-theme="dark"] .input-with-icon input { background:rgba(255,255,255,.05); }
         .input-with-icon input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(59,130,246,.2); }
         .auth-btn { width:100%; margin-top:4px; }
-        .divider { text-align:center; position:relative; color:var(--text-secondary); font-size:.82rem; margin:20px 0; }
-        .divider::before,.divider::after { content:''; position:absolute; top:50%; width:calc(50% - 50px); height:1px; background:var(--border-color); }
-        .divider::before { left:0; } .divider::after { right:0; }
-        .social-btns { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
-        .btn-social { display:flex; align-items:center; justify-content:center; gap:7px; padding:10px; border-radius:12px; border:1.5px solid var(--border-color); background:transparent; color:var(--text-primary); font-size:.88rem; font-weight:600; cursor:pointer; transition:all .2s; text-decoration:none; }
-        .btn-social:hover { background:rgba(59,130,246,.08); border-color:var(--accent); }
-        .btn-google { color:#ea4335; } .btn-facebook { color:#1877f2; } .btn-instagram { color:#e1306c; }
-        .auth-footer { text-align:center; font-size:.87rem; color:var(--text-secondary); margin-top:20px; }
+        .auth-footer { text-align:center; font-size:.87rem; color:var(--text-secondary); margin-top:24px; }
         .auth-footer a { color:var(--accent); font-weight:600; text-decoration:none; }
         .auth-footer a:hover { text-decoration:underline; }
     </style>
@@ -78,19 +71,6 @@
                     <i class="fas fa-user-plus"></i> Create Account
                 </button>
             </form>
-
-            <div class="divider">or continue with</div>
-            <div class="social-btns">
-                <a href="/auth/google/login" class="btn-social">
-                    <i class="fab fa-google btn-google"></i> Google
-                </a>
-                <a href="/mock_social_login/facebook" class="btn-social">
-                    <i class="fab fa-facebook btn-facebook"></i> Facebook
-                </a>
-                <a href="/mock_social_login/instagram" class="btn-social">
-                    <i class="fab fa-instagram btn-instagram"></i> Instagram
-                </a>
-            </div>
 
             <p class="auth-footer">Already have an account? <a href="/login">Login here</a></p>
         </div>
