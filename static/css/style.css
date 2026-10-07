@@ -296,10 +296,148 @@ body{
 .msg-text-container code{background:rgba(99,102,241,.12);color:var(--accent2);
     padding:2px 6px;border-radius:6px;font-size:.88em;}
 .tts-btn{background:none;border:none;color:var(--text-secondary);cursor:pointer;
-    font-size:.78rem;padding:4px 8px;border-radius:6px;margin-top:8px;
+    font-size:.78rem;padding:4px 8px;border-radius:6px;
     display:inline-flex;align-items:center;gap:4px;transition:color .15s;}
 .tts-btn:hover{color:var(--accent);}
 .tts-btn.speaking{color:#10b981;}
+
+/* MESSAGE ACTIONS & EDIT */
+.message-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    opacity: 0;
+    transition: opacity .18s ease;
+}
+.message:hover .message-actions,
+.message:focus-within .message-actions {
+    opacity: 1;
+}
+@media (hover: none) {
+    .message-actions { opacity: 0.85; }
+}
+.message.user .message-actions {
+    justify-content: flex-end;
+}
+.msg-action-btn {
+    background: rgba(255, 255, 255, 0.16);
+    border: none;
+    color: #fff;
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: background .15s, transform .1s;
+    backdrop-filter: blur(4px);
+}
+.msg-action-btn:hover {
+    background: rgba(255, 255, 255, 0.28);
+    transform: translateY(-1px);
+}
+.message.model .msg-action-btn {
+    background: rgba(0, 0, 0, 0.04);
+    color: var(--text-secondary);
+}
+[data-theme="dark"] .message.model .msg-action-btn {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+}
+.message.model .msg-action-btn:hover {
+    color: var(--accent);
+    background: rgba(59, 130, 246, 0.12);
+}
+
+/* Inline Edit Box */
+.msg-edit-box {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    min-width: 240px;
+}
+.msg-edit-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1.5px solid rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    font-size: 0.92rem;
+    font-family: inherit;
+    resize: vertical;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color .15s, box-shadow .15s;
+    line-height: 1.5;
+}
+.msg-edit-textarea:focus {
+    border-color: #fff;
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.25);
+}
+.msg-edit-buttons {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.btn-msg-edit-cancel {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    color: #fff;
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s;
+}
+.btn-msg-edit-cancel:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+.btn-msg-edit-save {
+    background: rgba(255, 255, 255, 0.22);
+    border: none;
+    color: #fff;
+    padding: 5px 11px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background .15s;
+}
+.btn-msg-edit-save:hover {
+    background: rgba(255, 255, 255, 0.35);
+}
+.btn-msg-edit-resubmit {
+    background: #fff;
+    border: none;
+    color: #4f46e5;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+}
+.btn-msg-edit-resubmit:hover {
+    opacity: 0.92;
+    transform: translateY(-1px);
+}
+.edited-badge {
+    font-size: 0.72rem;
+    opacity: 0.78;
+    margin-left: 6px;
+    font-style: italic;
+    font-weight: normal;
+}
 
 /* TYPING INDICATOR */
 #typing-indicator.message{align-items:flex-start;}

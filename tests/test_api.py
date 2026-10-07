@@ -285,3 +285,49 @@ def test_api_nearby_vets_requires_login():
     c = app_mod.app.test_client()
     resp = c.get('/api/nearby-vets?lat=12.97&lon=77.59')
     assert resp.status_code == 401
+
+
+def test_edit_message_unauthorized():
+    c = app_mod.app.test_client()
+    resp = c.put('/api/messages/99999', json={'content': 'Updated content'})
+    assert resp.status_code == 401
+
+
+def test_edit_message_success_and_model_validation():
+    c = app_mod.app.test_client()
+    from extensions import db
+    from models import User, ChatSession, Message
+
+    with app_mod.app.app_context():
+        u = User.query.filter_by(username='testuser').first()
+        user_id = u.id
+        sess = ChatSession(user_id=user_id, title='Edit Test')
+        db.session.add(sess)
+        db.session.commit()
+
+        user_m = Message(session_id=sess.id, role='user', content='Original question')
+        model_m = Message(session_id=sess.id, role='model', content='Original answer')
+        db.session.add_all([user_m, model_m])
+        db.session.commit()
+
+        user_msg_id = user_m.id
+        model_msg_id = model_m.id
+
+    with c.session_transaction() as sess_client:
+        sess_client['user_id'] = user_id
+
+    # Test editing user message without resubmit
+    resp = c.put(f'/api/messages/{user_msg_id}', json={'content': 'Fixed question', 'resubmit': False})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data['success'] is True
+    assert data['message']['content'] == 'Fixed question'
+
+    with app_mod.app.app_context():
+        reloaded = Message.query.get(user_msg_id)
+        assert reloaded.content == 'Fixed question'
+
+    # Test that model messages cannot be edited
+    resp_model = c.put(f'/api/messages/{model_msg_id}', json={'content': 'Hacked reply'})
+    assert resp_model.status_code == 400
+    assert 'Only user messages can be edited' in resp_model.get_json()['error']

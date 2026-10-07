@@ -126,11 +126,25 @@ if genai_api_key:
 def get_gemini_api_key():
     """Dynamically read the latest GOOGLE_API_KEY from .env and configure genai if changed."""
     global api_key, genai_api_key
+    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
     try:
-        load_dotenv(override=True)
+        load_dotenv(dotenv_path=env_file, override=True)
     except Exception:
         pass
     k = os.getenv("GOOGLE_API_KEY")
+    if not k and os.path.exists(env_file):
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('GOOGLE_API_KEY=') and not line.startswith('#'):
+                        val = line.split('=', 1)[1].strip().strip("'\"")
+                        if val:
+                            k = val
+                            os.environ['GOOGLE_API_KEY'] = val
+                        break
+        except Exception:
+            pass
     if k:
         k = k.strip().strip("'\"")
     if k and k != genai_api_key:
@@ -857,6 +871,51 @@ def transcribe_audio_route():
     return jsonify({'error': 'No speech recognized. Please speak into the microphone or type your message.'}), 422
 
 
+def generate_ai_reply(content, language='English', custom_instructions='', image_path=None):
+    """Helper to generate pet care advice from Gemini multimodal models."""
+    system_instruction = (
+        f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\n"
+        f"CRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. "
+        f"Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
+    )
+    if custom_instructions:
+        system_instruction += f"USER PREFERENCES: {custom_instructions}\n\n"
+
+    active_key = get_gemini_api_key()
+    if not active_key:
+        return "To use the AI, please add a GOOGLE_API_KEY to your .env file."
+
+    prompt_parts = [system_instruction + content]
+    if image_path:
+        try:
+            import PIL.Image
+            img = PIL.Image.open(os.path.join(app.root_path, image_path))
+            prompt_parts.append(img)
+        except Exception:
+            pass
+
+    model_candidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
+    response = None
+    last_err = None
+    for m_name in model_candidates:
+        try:
+            model = genai.GenerativeModel(m_name)
+            response = model.generate_content(prompt_parts)
+            break
+        except Exception as m_err:
+            last_err = m_err
+            err_str = str(m_err)
+            if "leaked" in err_str.lower() or "PERMISSION_DENIED" in err_str or "API_KEY_INVALID" in err_str:
+                raise m_err
+            continue
+
+    if response is not None:
+        return extract_model_response_text(response)
+    elif last_err:
+        raise last_err
+    return "I’m ready to help, but I didn’t receive a meaningful reply from the model."
+
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     if 'user_id' not in session:
@@ -952,36 +1011,13 @@ def chat():
 
     # Generate response with Gemini
     response_content = ""
-    active_key = get_gemini_api_key()
     try:
-        if not active_key:
-            response_content = "To use the AI, please add a GOOGLE_API_KEY to your .env file."
-        else:
-            prompt_parts = [system_instruction + content]
-            if image_path:
-                import PIL.Image
-                img = PIL.Image.open(os.path.join(app.root_path, image_path))
-                prompt_parts.append(img)
-
-            model_candidates = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-2.5-pro"]
-            response = None
-            last_err = None
-            for m_name in model_candidates:
-                try:
-                    model = genai.GenerativeModel(m_name)
-                    response = model.generate_content(prompt_parts)
-                    break
-                except Exception as m_err:
-                    last_err = m_err
-                    err_str = str(m_err)
-                    if "leaked" in err_str.lower() or "PERMISSION_DENIED" in err_str or "API_KEY_INVALID" in err_str:
-                        raise m_err
-                    continue
-
-            if response is not None:
-                response_content = extract_model_response_text(response)
-            elif last_err:
-                raise last_err
+        response_content = generate_ai_reply(
+            content=content,
+            language=language,
+            custom_instructions=custom_instructions,
+            image_path=image_path
+        )
     except Exception as e:
         print(f"Error generating response: {e}")
         err_str = str(e)
@@ -1095,6 +1131,80 @@ def chat():
             'image_path': model_image_path,
             'thumb_path': model_thumb_path
         }
+    })
+
+
+@app.route('/api/messages/<int:message_id>', methods=['PUT', 'PATCH'])
+def edit_message(message_id):
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    msg = Message.query.get(message_id)
+    if not msg:
+        return jsonify({'error': 'Message not found'}), 404
+
+    chat_session = ChatSession.query.get(msg.session_id)
+    if not chat_session or chat_session.user_id != session['user_id']:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    if msg.role != 'user':
+        return jsonify({'error': 'Only user messages can be edited'}), 400
+
+    data = request.get_json(silent=True) or request.form
+    new_content = (data.get('content') or '').strip()
+    if not new_content:
+        return jsonify({'error': 'Message content cannot be empty'}), 400
+
+    resubmit = bool(data.get('resubmit', False))
+    language = data.get('language') or 'English'
+    custom_instructions = data.get('custom_instructions', '')
+
+    msg.content = new_content
+    db.session.commit()
+
+    model_data = None
+    if resubmit:
+        try:
+            new_reply = generate_ai_reply(
+                new_content,
+                language=language,
+                custom_instructions=custom_instructions,
+                image_path=msg.image_path
+            )
+        except Exception as e:
+            new_reply = f"I'm sorry, I encountered an error: {str(e)}"
+
+        # Find the model message immediately following this user message
+        model_msg = Message.query.filter(
+            Message.session_id == msg.session_id,
+            Message.id > msg.id,
+            Message.role == 'model'
+        ).order_by(Message.id.asc()).first()
+
+        if model_msg:
+            model_msg.content = new_reply
+            db.session.commit()
+        else:
+            model_msg = Message(session_id=msg.session_id, role='model', content=new_reply)
+            db.session.add(model_msg)
+            db.session.commit()
+
+        model_data = {
+            'id': model_msg.id,
+            'role': 'model',
+            'content': model_msg.content,
+            'created_at': model_msg.created_at.isoformat()
+        }
+
+    return jsonify({
+        'success': True,
+        'message': {
+            'id': msg.id,
+            'role': 'user',
+            'content': msg.content,
+            'created_at': msg.created_at.isoformat()
+        },
+        'model_message': model_data
     })
 
 

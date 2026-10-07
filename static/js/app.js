@@ -487,7 +487,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             } else {
                 messages.forEach(msg => {
-                    appendMessage(msg.role, msg.content, msg.image_path, msg.image_caption);
+                    appendMessage(msg.role, msg.content, msg.image_path, msg.image_caption, false, msg.id);
                 });
                 scrollToBottom();
             }
@@ -524,7 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const userImageSrc = (selectedFilePreviews && selectedFilePreviews.length) ? selectedFilePreviews.slice() : null;
         const captionEl = document.getElementById('image-caption-input');
         const userCaption = (captionEl && captionEl.value) ? captionEl.value.trim() : null;
-        appendMessage('user', userContent, userImageSrc, userCaption);
+        const userMsgDiv = appendMessage('user', userContent, userImageSrc, userCaption);
         
         // Prepare FormData (for normal chat)
         const formData = new FormData();
@@ -590,11 +590,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.error) {
                 appendMessage('model', `Error: ${data.error}`);
             } else {
+                if (data.user_message && data.user_message.id && userMsgDiv) {
+                    userMsgDiv.dataset.messageId = data.user_message.id;
+                }
                 if (data.model_message) {
                     const displaySrc = data.model_message.thumb_path || data.model_message.image_path || data.model_message.image_data || null;
                     const fullSrc = data.model_message.image_path || data.model_message.image_data || null;
                     const modelCaption = data.model_message.image_caption || null;
-                    appendMessage('model', data.model_message.content, { display: displaySrc, full: fullSrc }, modelCaption, true);
+                    appendMessage('model', data.model_message.content, { display: displaySrc, full: fullSrc }, modelCaption, true, data.model_message.id);
                 } else if (data.model_text) {
                     appendMessage('model', data.model_text);
                 } else if (data.structured && data.model_text) {
@@ -621,9 +624,14 @@ document.addEventListener('DOMContentLoaded', () => {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function appendMessage(role, content, imagePathOrDataUrl = null, caption = null, shouldStream = false) {
+    function appendMessage(role, content, imagePathOrDataUrl = null, caption = null, shouldStream = false, messageId = null) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${role}`;
+        msgDiv.dataset.role = role;
+        if (messageId) {
+            msgDiv.dataset.messageId = messageId;
+        }
+        msgDiv.dataset.rawContent = content || '';
         
         const icon = role === 'user' ? 'fa-user' : 'fa-paw';
         
@@ -669,12 +677,24 @@ document.addEventListener('DOMContentLoaded', () => {
         // Parse markdown if it's from model
         const formattedContent = role === 'model' ? marked.parse(content || '') : (content || '').replace(/\n/g, '<br>');
 
+        const actionsHtml = role === 'user' ? `
+            <div class="message-actions">
+                <button type="button" class="msg-action-btn edit-msg-btn" title="Edit message"><i class="fas fa-pencil-alt"></i> Edit</button>
+                <button type="button" class="msg-action-btn copy-msg-btn" title="Copy text"><i class="fas fa-copy"></i></button>
+            </div>
+        ` : `
+            <div class="message-actions">
+                <button type="button" class="tts-btn" title="Read Aloud"><i class="fas fa-volume-up"></i></button>
+                <button type="button" class="msg-action-btn copy-msg-btn" title="Copy text"><i class="fas fa-copy"></i></button>
+            </div>
+        `;
+
         msgDiv.innerHTML = `
             <div class="avatar"><i class="fas ${icon}"></i></div>
             <div class="message-content">
                 ${imageHtml}
                 <div class="msg-text-container"></div>
-                ${role === 'model' ? `<button class="tts-btn" title="Read Aloud"><i class="fas fa-volume-up"></i></button>` : ''}
+                ${actionsHtml}
             </div>
         `;
         
@@ -811,6 +831,150 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
         }
+
+        // Add Edit logic for user messages
+        const editBtn = msgDiv.querySelector('.edit-msg-btn');
+        if (editBtn) {
+            editBtn.addEventListener('click', () => {
+                if (msgDiv.querySelector('.msg-edit-box')) return;
+
+                const originalText = msgDiv.dataset.rawContent || '';
+                const actionsContainer = msgDiv.querySelector('.message-actions');
+
+                textContainer.style.display = 'none';
+                if (actionsContainer) actionsContainer.style.display = 'none';
+
+                const editBox = document.createElement('div');
+                editBox.className = 'msg-edit-box';
+                editBox.innerHTML = `
+                    <textarea class="msg-edit-textarea" rows="2">${escapeHtml(originalText)}</textarea>
+                    <div class="msg-edit-buttons">
+                        <button type="button" class="btn-msg-edit-cancel">Cancel</button>
+                        <button type="button" class="btn-msg-edit-save">Save</button>
+                        <button type="button" class="btn-msg-edit-resubmit">Save & Resubmit</button>
+                    </div>
+                `;
+                msgDiv.querySelector('.message-content').appendChild(editBox);
+
+                const textarea = editBox.querySelector('.msg-edit-textarea');
+                textarea.focus();
+                textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+                textarea.style.height = 'auto';
+                textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+                textarea.addEventListener('input', () => {
+                    textarea.style.height = 'auto';
+                    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+                });
+
+                editBox.querySelector('.btn-msg-edit-cancel').addEventListener('click', () => {
+                    editBox.remove();
+                    textContainer.style.display = '';
+                    if (actionsContainer) actionsContainer.style.display = '';
+                });
+
+                const performEdit = async (resubmit) => {
+                    const newText = textarea.value.trim();
+                    if (!newText) return;
+
+                    const msgId = msgDiv.dataset.messageId;
+                    if (!msgId) {
+                        msgDiv.dataset.rawContent = newText;
+                        textContainer.innerHTML = newText.replace(/\n/g, '<br>') + ' <span class="edited-badge">(edited)</span>';
+                        editBox.remove();
+                        textContainer.style.display = '';
+                        if (actionsContainer) actionsContainer.style.display = '';
+                        return;
+                    }
+
+                    const saveBtn = resubmit ? editBox.querySelector('.btn-msg-edit-resubmit') : editBox.querySelector('.btn-msg-edit-save');
+                    const originalBtnText = saveBtn.innerHTML;
+                    saveBtn.disabled = true;
+                    saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+
+                    try {
+                        const langSelect = document.getElementById('language-select');
+                        const customInstructions = localStorage.getItem('custom_instructions') || '';
+
+                        const response = await fetch(`/api/messages/${msgId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                content: newText,
+                                resubmit: resubmit,
+                                language: langSelect ? langSelect.value : 'English',
+                                custom_instructions: customInstructions
+                            }),
+                            credentials: 'same-origin'
+                        });
+
+                        if (!response.ok) {
+                            const errData = await response.json().catch(() => ({}));
+                            alert(errData.error || 'Failed to update message');
+                            saveBtn.disabled = false;
+                            saveBtn.innerHTML = originalBtnText;
+                            return;
+                        }
+
+                        const result = await response.json();
+                        msgDiv.dataset.rawContent = newText;
+                        textContainer.innerHTML = newText.replace(/\n/g, '<br>') + ' <span class="edited-badge">(edited)</span>';
+                        editBox.remove();
+                        textContainer.style.display = '';
+                        if (actionsContainer) actionsContainer.style.display = '';
+
+                        if (resubmit && result.model_message) {
+                            let nextMsg = msgDiv.nextElementSibling;
+                            while (nextMsg && !nextMsg.classList.contains('message')) {
+                                nextMsg = nextMsg.nextElementSibling;
+                            }
+                            if (nextMsg && nextMsg.classList.contains('model')) {
+                                const nextTextContainer = nextMsg.querySelector('.msg-text-container');
+                                if (nextTextContainer) {
+                                    nextTextContainer.innerHTML = marked.parse(result.model_message.content || '');
+                                    nextMsg.dataset.rawContent = result.model_message.content || '';
+                                }
+                            } else {
+                                appendMessage('model', result.model_message.content, null, null, false, result.model_message.id);
+                            }
+                            scrollToBottom();
+                        }
+                    } catch (err) {
+                        console.error('Error saving edited message:', err);
+                        alert('Error updating message. Please check your connection.');
+                        saveBtn.disabled = false;
+                        saveBtn.innerHTML = originalBtnText;
+                    }
+                };
+
+                editBox.querySelector('.btn-msg-edit-save').addEventListener('click', () => performEdit(false));
+                editBox.querySelector('.btn-msg-edit-resubmit').addEventListener('click', () => performEdit(true));
+            });
+        }
+
+        // Add Copy logic
+        const copyBtn = msgDiv.querySelector('.copy-msg-btn');
+        if (copyBtn) {
+            copyBtn.addEventListener('click', async () => {
+                const textToCopy = msgDiv.dataset.rawContent || (msgDiv.querySelector('.msg-text-container') ? msgDiv.querySelector('.msg-text-container').innerText : '');
+                try {
+                    await navigator.clipboard.writeText(textToCopy);
+                    const originalHtml = copyBtn.innerHTML;
+                    copyBtn.innerHTML = '<i class="fas fa-check" style="color:#10b981;"></i>';
+                    setTimeout(() => { copyBtn.innerHTML = originalHtml; }, 2000);
+                } catch (e) {
+                    const ta = document.createElement('textarea');
+                    ta.value = textToCopy;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand('copy');
+                    ta.remove();
+                    copyBtn.innerHTML = '<i class="fas fa-check" style="color:#10b981;"></i>';
+                    setTimeout(() => { copyBtn.innerHTML = '<i class="fas fa-copy"></i>'; }, 2000);
+                }
+            });
+        }
+
+        return msgDiv;
     }
 
     // Insert raw HTML message (used for structured scan analysis cards)
