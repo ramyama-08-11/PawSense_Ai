@@ -1949,6 +1949,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div><strong>Upgrade to Pro</strong><small>Unlock unlimited features</small></div>
                         <i class="fas fa-chevron-right"></i>
                     </div>
+                    <div class="profile-logout-wrap">
+                        <button class="profile-logout-btn" id="profile-logout-btn" onclick="handleLogout()">
+                            <i class="fas fa-sign-out-alt"></i> Log Out
+                        </button>
+                    </div>
                 </div>
             `;
             fetch('/api/sessions').then(r=>r.json()).then(s=>{const el=document.getElementById('stat-chats');if(el)el.textContent=s.length||0;}).catch(()=>{});
@@ -2037,6 +2042,12 @@ document.addEventListener('DOMContentLoaded', () => {
         // Flash save button
         const btn = event?.target;
         if (btn) { btn.innerHTML = '<i class="fas fa-check"></i> Saved!'; btn.style.background='#10b981'; setTimeout(()=>{ btn.innerHTML='<i class="fas fa-save"></i> Save Changes'; btn.style.background=''; }, 2000); }
+    };
+
+    window.handleLogout = function() {
+        if (confirm('Are you sure you want to log out?')) {
+            window.location.href = '/logout';
+        }
     };
 
     window.showChangePasswordForm = function() {
@@ -2255,10 +2266,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Logout Functionality
     const logoutItem = document.querySelector('.dropdown-list:last-of-type li:last-child');
     if (logoutItem) {
-        logoutItem.addEventListener('click', () => {
-            if (confirm('Are you sure you want to log out?')) {
-                window.location.href = '/logout';
-            }
+        logoutItem.addEventListener('click', (e) => {
+            e.preventDefault();
+            handleLogout();
         });
     }
 

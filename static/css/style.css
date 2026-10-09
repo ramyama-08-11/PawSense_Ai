@@ -742,6 +742,53 @@ body{
 .upgrade-banner div small{font-size:.78rem;color:var(--text-secondary);}
 .upgrade-banner i:last-child{color:var(--text-secondary);font-size:.85rem;}
 
+/* Profile Logout */
+.profile-logout-wrap {
+    margin-top: 4px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color);
+}
+
+.profile-logout-btn {
+    width: 100%;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 1.5px solid rgba(239, 68, 68, 0.35);
+    background: rgba(239, 68, 68, 0.06);
+    color: #ef4444;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.profile-logout-btn:hover {
+    background: #ef4444;
+    color: #ffffff;
+    border-color: #ef4444;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+}
+
+.profile-logout-btn:active {
+    transform: translateY(0);
+}
+
+.profile-logout-btn i {
+    font-size: 1rem;
+    transition: transform 0.2s ease;
+}
+
+.profile-logout-btn:hover i {
+    transform: translateX(2px);
+}
+
+
 /* ── NEARBY VETERINARY CLINICS & LOCATOR ── */
 .nearby-vets-container {
     width: 100%;
