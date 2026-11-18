@@ -985,3 +985,246 @@ body{
         max-height: 200px !important;
     }
 }
+
+/* ===================================================
+   AI PET IMAGE STUDIO & LIGHTBOX STYLES
+   =================================================== */
+.image-studio-content {
+    max-width: 620px;
+    width: 95%;
+    border-radius: 20px;
+    background: var(--bg-card);
+    backdrop-filter: blur(16px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+    border: 1px solid var(--border-color);
+}
+.modal-subtitle {
+    font-size: 0.92rem;
+    color: var(--text-secondary);
+    margin-bottom: 18px;
+    line-height: 1.5;
+}
+.studio-form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.studio-form-group label {
+    font-size: 0.88rem;
+    color: var(--text-primary);
+}
+.studio-form-group textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-message-model);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.92rem;
+    resize: vertical;
+    transition: border-color 0.2s, box-shadow 0.2s;
+    box-sizing: border-box;
+}
+.studio-form-group textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+.style-selector-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 10px;
+}
+.style-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-message-model);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    text-align: center;
+}
+.style-chip i {
+    font-size: 1.15rem;
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+}
+.style-chip:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+    transform: translateY(-2px);
+}
+.style-chip:hover i {
+    transform: scale(1.15);
+    color: var(--accent);
+}
+.style-chip.active {
+    border-color: var(--accent);
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--accent);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+}
+.style-chip.active i {
+    color: var(--accent);
+}
+.inspiration-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.inspire-chip {
+    background: var(--bg-message-model);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+.inspire-chip:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+    transform: translateY(-1px);
+}
+.studio-actions {
+    margin-top: 24px;
+    display: flex;
+    justify-content: flex-end;
+}
+.studio-actions .btn-primary {
+    padding: 12px 24px;
+    font-size: 0.95rem;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Generated Image UI in Chat */
+.generated-image-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(139, 92, 246, 0.15));
+    border: 1px solid rgba(236, 72, 153, 0.3);
+    color: #ec4899;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 12px;
+    margin-bottom: 8px;
+}
+.img-wrap {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    cursor: zoom-in;
+    border-radius: 14px;
+    overflow: hidden;
+}
+.img-wrap img {
+    display: block;
+    border-radius: 14px;
+    transition: transform 0.25s ease, filter 0.25s ease;
+    max-width: 100%;
+}
+.img-wrap:hover img {
+    transform: scale(1.02);
+}
+.img-action-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+}
+.img-action-bar a, .img-action-bar button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    font-size: 0.78rem;
+    border-radius: 8px;
+    text-decoration: none;
+    border: 1px solid var(--border-color);
+    background: var(--bg-message-model);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.img-action-bar a:hover, .img-action-bar button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+/* Lightbox Modal */
+.lightbox-container {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: rgba(15, 23, 42, 0.95);
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+.lightbox-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 1.8rem;
+    cursor: pointer;
+    line-height: 1;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+    z-index: 10;
+}
+.lightbox-close:hover {
+    opacity: 1;
+}
+#lightbox-image {
+    max-width: 85vw;
+    max-height: 72vh;
+    object-fit: contain;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+.lightbox-footer {
+    width: 100%;
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: #e2e8f0;
+}
+#lightbox-caption {
+    font-size: 0.9rem;
+    font-weight: 500;
+    max-width: 70%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.lightbox-actions {
+    display: flex;
+    gap: 8px;
+}
+

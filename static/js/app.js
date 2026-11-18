@@ -539,6 +539,15 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
 
+        if (chatForm.dataset.isImageRequest === 'true') {
+            formData.append('is_image_request', 'true');
+            if (chatForm.dataset.imageStyle) {
+                formData.append('style', chatForm.dataset.imageStyle);
+            }
+            delete chatForm.dataset.isImageRequest;
+            delete chatForm.dataset.imageStyle;
+        }
+
         // Reset input
         messageInput.value = '';
         messageInput.style.height = 'auto';
@@ -551,7 +560,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (emptyState) emptyState.remove();
 
         // Show typing indicator
-        showTypingIndicator();
+        const isImageIntent = /^\/(image|imagine|generate|draw|art)\b/i.test(content) ||
+                              /\b(generate|create|draw|paint)\s+(?:an?\s+)?(image|picture|photo)\b/i.test(content) ||
+                              formData.get('is_image_request') === 'true';
+        if (isImageIntent) {
+            showTypingIndicator('Pawsense is generating your pet image…');
+        } else {
+            showTypingIndicator();
+        }
         scrollToBottom();
 
         try {
@@ -615,6 +631,13 @@ document.addEventListener('DOMContentLoaded', () => {
         return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
+    function normalizeImageSrc(val) {
+        if (!val) return '';
+        if (typeof val !== 'string') return '';
+        if (val.startsWith('data:') || val.startsWith('http://') || val.startsWith('https://')) return val;
+        return val.startsWith('/') ? val : '/' + val;
+    }
+
     function appendMessage(role, content, imagePathOrDataUrl = null, caption = null, shouldStream = false, messageId = null) {
         const msgDiv = document.createElement('div');
         msgDiv.className = `message ${role}`;
@@ -626,44 +649,46 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const icon = role === 'user' ? 'fa-user' : 'fa-paw';
         
-            let imageHtml = '';
-            let fullSrcAttr = '';
-            if (imagePathOrDataUrl) {
-                // Support arrays of images or single image
-                if (Array.isArray(imagePathOrDataUrl)) {
-                    imagePathOrDataUrl.forEach((item, idx) => {
-                        let display = null, full = null;
-                        if (typeof item === 'string') display = item;
-                        else if (typeof item === 'object') { display = item.display; full = item.full; }
-                        const src = display && display.startsWith('data:') ? display : (display ? `/${display}` : '');
-                        if (src) {
-                            const fattr = full ? ` data-full="/${full}"` : '';
-                            imageHtml += `<div class="img-wrap"><img src="${src}" alt="Attached image"${fattr}></div>`;
-                            // caption may be an array matching images or a single string
-                            if (Array.isArray(caption) && caption[idx]) imageHtml += `<div class="img-caption">${escapeHtml(caption[idx])}</div>`;
-                            else if (caption && !Array.isArray(caption)) imageHtml += `<div class="img-caption">${escapeHtml(caption)}</div>`;
-                        }
-                    });
-                } else {
-                    // imagePathOrDataUrl may be a string or an object {display, full}
-                    let display = null, full = null;
-                    if (typeof imagePathOrDataUrl === 'string') display = imagePathOrDataUrl;
-                    else if (typeof imagePathOrDataUrl === 'object') { display = imagePathOrDataUrl.display; full = imagePathOrDataUrl.full; }
-                    const src = display && display.startsWith('data:') ? display : (display ? `/${display}` : '');
-                    if (src) {
-                        if (full) fullSrcAttr = ` data-full="/${full}"`;
-                        imageHtml = `
-                            <div class="img-wrap">
-                                <img src="${src}" alt="Attached image"${fullSrcAttr}>
-                            </div>`;
-                        if (caption) {
-                            imageHtml += `<div class="img-caption">${escapeHtml(caption)}</div>`;
-                        }
-                    } else {
-                        imageHtml = '';
-                    }
-                }
+        let imageHtml = '';
+        if (imagePathOrDataUrl) {
+            const renderSingleImgBlock = (item, idx) => {
+                let display = null, full = null;
+                if (typeof item === 'string') display = item;
+                else if (typeof item === 'object' && item !== null) { display = item.display; full = item.full; }
+                const src = normalizeImageSrc(display);
+                const fullSrc = normalizeImageSrc(full) || src;
+                if (!src) return '';
+                const isGen = (role === 'model') || (src && (src.includes('generated_') || src.includes('protected_uploads')));
+                const badge = isGen ? `<div class="generated-image-pill"><i class="fas fa-wand-magic-sparkles"></i> AI Generated</div>` : '';
+                const capText = (Array.isArray(caption) && caption[idx]) ? caption[idx] : (caption && !Array.isArray(caption) ? caption : '');
+                const capHtml = capText ? `<div class="img-caption">${escapeHtml(capText)}</div>` : '';
+                const downloadName = (fullSrc.split('/').pop() || 'pet-image.png').split('?')[0];
+                const actionBar = isGen ? `
+                    <div class="img-action-bar">
+                        <a href="${fullSrc}" download="${downloadName}" target="_blank" title="Download Image"><i class="fas fa-download"></i> Download</a>
+                        <button type="button" class="view-lightbox-btn" data-src="${fullSrc}" data-caption="${escapeHtml(capText)}"><i class="fas fa-expand"></i> Preview</button>
+                    </div>
+                ` : '';
+                return `
+                    <div class="img-container-block">
+                        ${badge}
+                        <div class="img-wrap" data-full="${fullSrc}" data-caption="${escapeHtml(capText)}" title="Click to view full preview">
+                            <img src="${src}" alt="Pet image" data-full="${fullSrc}">
+                        </div>
+                        ${capHtml}
+                        ${actionBar}
+                    </div>
+                `;
+            };
+
+            if (Array.isArray(imagePathOrDataUrl)) {
+                imagePathOrDataUrl.forEach((item, idx) => {
+                    imageHtml += renderSingleImgBlock(item, idx);
+                });
+            } else {
+                imageHtml = renderSingleImgBlock(imagePathOrDataUrl, 0);
             }
+        }
         
         // Parse markdown if it's from model
         const formattedContent = role === 'model' ? marked.parse(content || '') : (content || '').replace(/\n/g, '<br>');
@@ -691,6 +716,18 @@ document.addEventListener('DOMContentLoaded', () => {
         
         chatMessages.appendChild(msgDiv);
         const textContainer = msgDiv.querySelector('.msg-text-container');
+
+        // Attach click listener for lightbox on images in this message
+        msgDiv.querySelectorAll('.img-wrap, .view-lightbox-btn').forEach(el => {
+            el.addEventListener('click', (ev) => {
+                if (ev.target.tagName.toLowerCase() === 'a' || ev.target.closest('a')) return;
+                const fullUrl = el.getAttribute('data-full') || el.getAttribute('data-src') || (el.querySelector('img') ? el.querySelector('img').getAttribute('data-full') : '');
+                const cap = el.getAttribute('data-caption') || '';
+                if (fullUrl) {
+                    openLightbox(fullUrl, cap);
+                }
+            });
+        });
 
         if (shouldStream && role === 'model') {
             // Simple streaming logic: parse HTML, then type it out word by word
@@ -995,17 +1032,19 @@ document.addEventListener('DOMContentLoaded', () => {
         return msgId;
     }
 
-    function showTypingIndicator() {
+    function showTypingIndicator(customLabel = null) {
+        removeTypingIndicator();
         const indicator = document.createElement('div');
         indicator.className = 'message model';
         indicator.id = 'typing-indicator';
+        const label = customLabel || 'Pawsense is thinking…';
         indicator.innerHTML = `
             <div class="avatar"><i class="fas fa-paw"></i></div>
             <div class="ai-thinking-wrapper">
                 <div class="ai-thinking-dots">
                     <span></span><span></span><span></span>
                 </div>
-                <span class="ai-thinking-label">Pawsense is thinking…</span>
+                <span class="ai-thinking-label">${escapeHtml(label)}</span>
             </div>
         `;
         chatMessages.appendChild(indicator);
@@ -1360,6 +1399,127 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
     if (closeGalleryBtn) closeGalleryBtn.addEventListener('click', ()=>{ galleryModal.style.display='none'; });
+
+    // ==========================================
+    // AI PET IMAGE STUDIO & LIGHTBOX CONTROLLERS
+    // ==========================================
+    const imageStudioModal = document.getElementById('image-studio-modal');
+    const generateImageBtn = document.getElementById('generate-image-btn');
+    const cardGenerateImage = document.getElementById('card-generate-image');
+    const closeImageStudioBtn = document.getElementById('close-image-studio-btn');
+    const imagePromptInput = document.getElementById('image-prompt-input');
+    const submitGenerateImageBtn = document.getElementById('submit-generate-image-btn');
+
+    let selectedImageStyle = 'photorealistic';
+
+    function openImageStudio() {
+        if (!imageStudioModal) return;
+        imageStudioModal.style.display = 'flex';
+        if (imagePromptInput) {
+            imagePromptInput.focus();
+        }
+    }
+
+    function closeImageStudio() {
+        if (!imageStudioModal) return;
+        imageStudioModal.style.display = 'none';
+    }
+
+    if (generateImageBtn) {
+        generateImageBtn.addEventListener('click', openImageStudio);
+    }
+    if (cardGenerateImage) {
+        cardGenerateImage.addEventListener('click', openImageStudio);
+    }
+    if (closeImageStudioBtn) {
+        closeImageStudioBtn.addEventListener('click', closeImageStudio);
+    }
+    if (imageStudioModal) {
+        imageStudioModal.addEventListener('click', (e) => {
+            if (e.target === imageStudioModal) closeImageStudio();
+        });
+    }
+
+    // Style chips selection
+    document.querySelectorAll('.style-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            document.querySelectorAll('.style-chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            selectedImageStyle = chip.getAttribute('data-style') || 'photorealistic';
+        });
+    });
+
+    // Inspiration chips click
+    document.querySelectorAll('.inspire-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            const prompt = chip.getAttribute('data-prompt');
+            const style = chip.getAttribute('data-style') || 'photorealistic';
+            if (imagePromptInput) imagePromptInput.value = prompt;
+            selectedImageStyle = style;
+            document.querySelectorAll('.style-chip').forEach(c => {
+                c.classList.toggle('active', c.getAttribute('data-style') === style);
+            });
+        });
+    });
+
+    // Submit image generation from Studio
+    if (submitGenerateImageBtn) {
+        submitGenerateImageBtn.addEventListener('click', async () => {
+            const prompt = imagePromptInput ? imagePromptInput.value.trim() : '';
+            if (!prompt) {
+                if (imagePromptInput) imagePromptInput.focus();
+                return;
+            }
+            closeImageStudio();
+
+            // Set message input and mark request
+            messageInput.value = `/image ${prompt}`;
+            chatForm.dataset.imageStyle = selectedImageStyle;
+            chatForm.dataset.isImageRequest = 'true';
+            
+            // Dispatch chat form submit to trigger live generation
+            chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
+        });
+    }
+
+    // Lightbox Controller
+    const lightboxModal = document.getElementById('image-lightbox-modal');
+    const lightboxImg = document.getElementById('lightbox-image');
+    const lightboxCaption = document.getElementById('lightbox-caption');
+    const lightboxDownloadBtn = document.getElementById('lightbox-download-btn');
+    const lightboxCloseBtn = document.getElementById('lightbox-close-btn');
+    const lightboxDismissBtn = document.getElementById('lightbox-dismiss-btn');
+
+    function openLightbox(src, caption = '') {
+        if (!lightboxModal || !lightboxImg) return;
+        lightboxImg.src = src;
+        if (lightboxCaption) lightboxCaption.textContent = caption || 'PawSense Generated Pet Image';
+        if (lightboxDownloadBtn) {
+            lightboxDownloadBtn.href = src;
+            lightboxDownloadBtn.download = (src.split('/').pop() || 'pet-image.png').split('?')[0];
+        }
+        lightboxModal.style.display = 'flex';
+    }
+
+    function closeLightbox() {
+        if (!lightboxModal) return;
+        lightboxModal.style.display = 'none';
+        if (lightboxImg) lightboxImg.src = '';
+    }
+
+    if (lightboxCloseBtn) lightboxCloseBtn.addEventListener('click', closeLightbox);
+    if (lightboxDismissBtn) lightboxDismissBtn.addEventListener('click', closeLightbox);
+    if (lightboxModal) {
+        lightboxModal.addEventListener('click', (e) => {
+            if (e.target === lightboxModal) closeLightbox();
+        });
+    }
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            if (lightboxModal && lightboxModal.style.display === 'flex') closeLightbox();
+            if (imageStudioModal && imageStudioModal.style.display === 'flex') closeImageStudio();
+        }
+    });
 
     function showUndoToast(filename, messageId){
         const toast = document.createElement('div');

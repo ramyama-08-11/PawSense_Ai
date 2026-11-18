@@ -27,6 +27,7 @@ from io import BytesIO
 from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
+from image_generator import detect_image_intent, generate_pet_image, enhance_prompt, IMAGE_STYLES
 
 load_dotenv()
 
@@ -351,6 +352,10 @@ def generate_svg_data_url(text, title='Diet Plan'):
     svg = '\n'.join(svg_lines)
     data_url = 'data:image/svg+xml;utf8,' + urllib.parse.quote(svg)
     return data_url, svg
+
+
+# Backward-compatible alias for diet visualization
+generate_plate_svg = generate_svg_data_url
 
 
 def normalize_username(value):
@@ -1004,6 +1009,78 @@ def chat():
     language = request.form.get('language', 'English')
     custom_instructions = request.form.get('custom_instructions', '')
     
+    # Check if this is an image generation request (via button, modal, or natural language intent)
+    is_image_req = request.form.get('is_image_request', '').lower() in ('1', 'true', 'yes')
+    intent_detected, extracted_prompt = detect_image_intent(content)
+    is_gen_image = (is_image_req or intent_detected) and not saved_paths
+
+    if is_gen_image:
+        image_prompt = extracted_prompt if (intent_detected and extracted_prompt) else (content or "cute pet")
+        style = request.form.get('style', 'photorealistic')
+        model_image_path = None
+        model_thumb_path = None
+        model_caption = image_prompt
+        try:
+            gen_res = generate_pet_image(
+                prompt=image_prompt,
+                style=style,
+                upload_folder=app.config['UPLOAD_FOLDER'],
+                api_key=get_gemini_api_key()
+            )
+            model_image_path = gen_res['image_path']
+            model_thumb_path = gen_res['thumb_path']
+            model_caption = gen_res['prompt']
+        except Exception as gen_err:
+            print(f"Error generating pet image: {gen_err}")
+
+        # Generate a warm, expert companion response
+        try:
+            companion_prompt = (
+                f"The user requested to generate an image: '{image_prompt}'. "
+                f"An AI image has just been successfully generated and shown to them. "
+                f"Provide a warm, friendly, concise expert petcare response in {language} (about 2-3 sentences), "
+                f"sharing an interesting breed fact, petcare tip, or observation about this animal. "
+                f"Do NOT say you cannot generate images, because the image is already created and attached right here."
+            )
+            response_content = generate_ai_reply(
+                content=companion_prompt,
+                language=language,
+                custom_instructions=custom_instructions
+            )
+        except Exception:
+            response_content = f"Here is your AI-generated pet image of **{image_prompt}**! 🐾\n\n*Created using PawSense AI Pet Studio. You can download this image or view it anytime in your My Generated Images gallery.*"
+
+        model_msg = Message(
+            session_id=chat_session.id,
+            role='model',
+            content=response_content,
+            image_path=model_image_path,
+            image_caption=model_caption
+        )
+        db.session.add(model_msg)
+        db.session.commit()
+
+        return jsonify({
+            'user_message': {
+                'id': user_msg.id,
+                'role': user_msg.role,
+                'content': user_msg.content,
+                'image_path': user_msg.image_path,
+                'created_at': user_msg.created_at.isoformat()
+            },
+            'model_message': {
+                'id': model_msg.id,
+                'role': model_msg.role,
+                'content': model_msg.content,
+                'created_at': model_msg.created_at.isoformat(),
+                'image_data': None,
+                'image_path': model_image_path,
+                'thumb_path': model_thumb_path,
+                'image_caption': model_caption,
+                'is_generated_image': True
+            }
+        })
+
     # System Instruction
     system_instruction = f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\nCRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
     if custom_instructions:
@@ -1208,7 +1285,95 @@ def edit_message(message_id):
     })
 
 
-# NOTE: `/api/generate_structured` endpoint removed — client always posts to `/api/chat` now.
+@app.route('/api/generate-image', methods=['POST'])
+def api_generate_image():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json(silent=True) or request.form
+    session_id = data.get('session_id')
+    prompt = (data.get('prompt') or '').strip()
+    style = data.get('style', 'photorealistic')
+    language = data.get('language', 'English')
+    custom_instructions = data.get('custom_instructions', '')
+
+    if not prompt:
+        return jsonify({'error': 'Image prompt is required'}), 400
+
+    chat_session = None
+    if session_id:
+        chat_session = ChatSession.query.get(session_id)
+        if not chat_session or chat_session.user_id != session['user_id']:
+            chat_session = None
+    if not chat_session:
+        title = prompt[:27] + '...' if len(prompt) > 27 else prompt
+        chat_session = ChatSession(user_id=session['user_id'], title=f"🎨 {title}")
+        db.session.add(chat_session)
+        db.session.commit()
+
+    # Save user message
+    user_msg = Message(session_id=chat_session.id, role='user', content=f"Generate image: {prompt}")
+    db.session.add(user_msg)
+    db.session.commit()
+
+    # Generate image
+    try:
+        gen_res = generate_pet_image(
+            prompt=prompt,
+            style=style,
+            upload_folder=app.config['UPLOAD_FOLDER'],
+            api_key=get_gemini_api_key()
+        )
+        model_image_path = gen_res['image_path']
+        model_thumb_path = gen_res['thumb_path']
+        model_caption = gen_res['prompt']
+    except Exception as e:
+        print(f"Failed to generate image: {e}")
+        return jsonify({'error': f"Failed to generate image: {str(e)}"}), 500
+
+    # Generate companion response
+    try:
+        companion_prompt = (
+            f"The user requested to generate an image: '{prompt}'. "
+            f"An AI image has just been successfully generated. "
+            f"Provide a warm, friendly, concise expert petcare response in {language} (2-3 sentences), "
+            f"sharing an interesting breed fact or petcare tip about this subject. "
+            f"Do not say you cannot make images."
+        )
+        response_content = generate_ai_reply(content=companion_prompt, language=language, custom_instructions=custom_instructions)
+    except Exception:
+        response_content = f"Here is your AI-generated pet image of **{prompt}**! 🐾\n\n*Created with PawSense AI Pet Studio. You can download it or view it in your My Generated Images gallery.*"
+
+    model_msg = Message(
+        session_id=chat_session.id,
+        role='model',
+        content=response_content,
+        image_path=model_image_path,
+        image_caption=model_caption
+    )
+    db.session.add(model_msg)
+    db.session.commit()
+
+    return jsonify({
+        'session_id': chat_session.id,
+        'user_message': {
+            'id': user_msg.id,
+            'role': user_msg.role,
+            'content': user_msg.content,
+            'image_path': user_msg.image_path,
+            'created_at': user_msg.created_at.isoformat()
+        },
+        'model_message': {
+            'id': model_msg.id,
+            'role': model_msg.role,
+            'content': model_msg.content,
+            'created_at': model_msg.created_at.isoformat(),
+            'image_path': model_image_path,
+            'thumb_path': model_thumb_path,
+            'image_caption': model_caption,
+            'is_generated_image': True
+        }
+    })
 
 
 @app.route('/protected_uploads/<path:filename>')
@@ -1219,7 +1384,13 @@ def protected_uploads(filename):
     # Lookup the message that owns this generated file
     expected = f"protected_uploads/{filename}"
     owner_msg = Message.query.filter_by(image_path=expected).first()
+    if not owner_msg and '_thumb' in filename:
+        base_filename = filename.replace('_thumb.webp', '.png').replace('_thumb.webp', '.svg').replace('_thumb.jpg', '.jpg')
+        owner_msg = Message.query.filter_by(image_path=f"protected_uploads/{base_filename}").first()
     if not owner_msg:
+        safe_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        if os.path.isfile(safe_path):
+            return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
         return abort(404)
     # Verify the requesting user owns the session containing the message
     if owner_msg.session.user_id != session.get('user_id'):

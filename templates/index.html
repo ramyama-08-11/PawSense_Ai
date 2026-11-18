@@ -167,6 +167,13 @@
                             behaviour & more!</p>
                     </div>
                     <div class="feature-cards">
+                        <div class="feature-card" id="card-generate-image">
+                            <div class="fc-icon" style="background: linear-gradient(135deg,#ec4899,#8b5cf6);">
+                                <i class="fas fa-wand-magic-sparkles"></i>
+                            </div>
+                            <h4>AI Pet Studio</h4>
+                            <p>Generate pet photos & artwork</p>
+                        </div>
                         <div class="feature-card" id="card-find-vets">
                             <div class="fc-icon" style="background: linear-gradient(135deg,#ef4444,#ec4899);">
                                 <i class="fas fa-map-marker-alt"></i>
@@ -225,6 +232,9 @@
                         </button>
                         <button type="button" id="find-vets-btn" class="icon-btn" title="Find Nearest Veterinary Hospitals by Location">
                             <i class="fas fa-map-marker-alt"></i>
+                        </button>
+                        <button type="button" id="generate-image-btn" class="icon-btn" title="AI Pet Image Studio (Generate Images)">
+                            <i class="fas fa-wand-magic-sparkles"></i>
                         </button>
 
                         <button type="button" id="voice-btn" class="icon-btn" title="Voice Input">
@@ -305,6 +315,83 @@
         window.GOOGLE_BROWSER_KEY = "{{ google_browser_key or '' }}";
     </script>
     <script src="{{ url_for('static', filename='js/app.js') }}?v=4.8"></script>
+
+    <!-- AI Pet Image Studio Modal -->
+    <div id="image-studio-modal" class="modal-overlay" style="display:none;">
+        <div class="modal-container modal-content image-studio-content">
+            <div class="modal-header">
+                <h2><i class="fas fa-wand-magic-sparkles gradient-icon"></i> AI Pet Image Studio</h2>
+                <button class="modal-close" id="close-image-studio-btn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-subtitle">Generate realistic pet photos, adorable 3D characters, or clinical diagrams directly with AI.</p>
+                
+                <div class="studio-form-group">
+                    <label for="image-prompt-input"><strong>Describe the Pet Image:</strong></label>
+                    <textarea id="image-prompt-input" rows="3" placeholder="e.g. Golden Retriever puppy playing with a ball in a flower meadow..."></textarea>
+                </div>
+
+                <div class="studio-form-group">
+                    <label><strong>Artistic Style:</strong></label>
+                    <div class="style-selector-grid">
+                        <div class="style-chip active" data-style="photorealistic">
+                            <i class="fas fa-camera"></i>
+                            <span>Photorealistic</span>
+                        </div>
+                        <div class="style-chip" data-style="cute-3d">
+                            <i class="fas fa-paw"></i>
+                            <span>Cute 3D Pixar</span>
+                        </div>
+                        <div class="style-chip" data-style="watercolor">
+                            <i class="fas fa-palette"></i>
+                            <span>Watercolor</span>
+                        </div>
+                        <div class="style-chip" data-style="clinical">
+                            <i class="fas fa-stethoscope"></i>
+                            <span>Clinical Guide</span>
+                        </div>
+                        <div class="style-chip" data-style="fantasy">
+                            <i class="fas fa-hat-wizard"></i>
+                            <span>Heroic / Fantasy</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="studio-form-group">
+                    <label><strong>Inspiration & Quick Ideas:</strong></label>
+                    <div class="inspiration-chips">
+                        <button type="button" class="inspire-chip" data-prompt="Golden Retriever puppy playing with a tennis ball on green grass" data-style="photorealistic">🐶 Golden Retriever Puppy</button>
+                        <button type="button" class="inspire-chip" data-prompt="Fluffy Persian kitten with vibrant sapphire blue eyes" data-style="cute-3d">🐱 Fluffy Persian Kitten</button>
+                        <button type="button" class="inspire-chip" data-prompt="Balanced nutritious raw dog meal bowl with chicken, carrots, and spinach" data-style="clinical">🥗 Canine Balanced Diet</button>
+                        <button type="button" class="inspire-chip" data-prompt="Siberian Husky in an epic snowy mountain winter wonderland" data-style="photorealistic">🐺 Husky in Snow</button>
+                        <button type="button" class="inspire-chip" data-prompt="Cute pug dressed up in superhero cape and mask" data-style="cute-3d">🦸 Superhero Pug</button>
+                        <button type="button" class="inspire-chip" data-prompt="Veterinary anatomy diagram of a dog's healthy ear structure" data-style="clinical">🩺 Pet Ear Anatomy</button>
+                    </div>
+                </div>
+
+                <div class="studio-actions">
+                    <button type="button" id="submit-generate-image-btn" class="btn-primary">
+                        <i class="fas fa-wand-magic-sparkles"></i> Generate Image
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Image Lightbox Modal -->
+    <div id="image-lightbox-modal" class="modal-overlay" style="display:none;">
+        <div class="lightbox-container">
+            <button class="lightbox-close" id="lightbox-close-btn">&times;</button>
+            <img id="lightbox-image" src="" alt="Full preview">
+            <div class="lightbox-footer">
+                <span id="lightbox-caption"></span>
+                <div class="lightbox-actions">
+                    <a id="lightbox-download-btn" class="btn-primary small" download><i class="fas fa-download"></i> Download</a>
+                    <button type="button" id="lightbox-dismiss-btn" class="btn-outline small">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- Map Modal -->
     <div id="map-modal" class="modal-overlay" style="display:none;">
