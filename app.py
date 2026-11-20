@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 import base64
 import tempfile
@@ -28,6 +29,7 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from image_generator import detect_image_intent, generate_pet_image, enhance_prompt, IMAGE_STYLES
+from pdf_generator import generate_session_pdf, generate_single_message_pdf
 
 load_dotenv()
 
@@ -1497,8 +1499,8 @@ def api_delete_generated():
         return jsonify({'error': 'Failed to delete', 'detail': str(e)}), 500
 
 
-    @app.route('/api/restore-generated', methods=['POST'])
-    def api_restore_generated():
+@app.route('/api/restore-generated', methods=['POST'])
+def api_restore_generated():
         if 'user_id' not in session:
             return jsonify({'error': 'Unauthorized'}), 401
         data = request.get_json() or {}
@@ -1538,8 +1540,33 @@ def api_delete_generated():
             return jsonify({'error': 'Failed to restore', 'detail': str(e)}), 500
 
 
-    @app.route('/api/message/report_pdf/<int:message_id>')
-    def message_report_pdf(message_id):
+@app.route('/api/sessions/<int:session_id>/export_pdf', methods=['GET'])
+def export_session_pdf(session_id):
+        if 'user_id' not in session:
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        chat_session = ChatSession.query.get(session_id)
+        if not chat_session or chat_session.user_id != session['user_id']:
+            return jsonify({'error': 'Session not found or unauthorized'}), 404
+            
+        user = User.query.get(session['user_id'])
+        
+        try:
+            pdf_buffer = generate_session_pdf(chat_session, user, app.config['UPLOAD_FOLDER'])
+            safe_title = re.sub(r'[^a-zA-Z0-9_\-]', '_', chat_session.title or 'consultation')[:25]
+            filename = f"pawsense_consultation_{chat_session.id}_{safe_title}.pdf"
+            return send_file(
+                pdf_buffer,
+                mimetype='application/pdf',
+                as_attachment=True,
+                download_name=filename
+            )
+        except Exception as e:
+            print(f"Error compiling session PDF: {e}")
+            return jsonify({'error': 'Failed to compile PDF report', 'detail': str(e)}), 500
+
+@app.route('/api/message/report_pdf/<int:message_id>')
+def message_report_pdf(message_id):
         if 'user_id' not in session:
             return jsonify({'error': 'Unauthorized'}), 401
         msg = Message.query.get(message_id)
@@ -1547,63 +1574,13 @@ def api_delete_generated():
             return jsonify({'error':'Not found'}), 404
         if msg.session.user_id != session.get('user_id'):
             return jsonify({'error':'Forbidden'}), 403
-        # find file: prefer image_path, else archive_path
-        ip = msg.image_path or msg.archive_path
-        if not ip:
-            return jsonify({'error':'No image attached'}), 400
-        fname = ip.split('/')[-1]
-        file_path = os.path.join(app.config['UPLOAD_FOLDER'], fname)
-        if not os.path.isfile(file_path):
-            # maybe archived
-            file_path = os.path.join(app.config['ARCHIVE_FOLDER'], fname)
-            if not os.path.isfile(file_path):
-                return jsonify({'error':'File missing'}), 404
 
+        user = User.query.get(session['user_id'])
         try:
-            img_reader = ImageReader(file_path)
-            bio = BytesIO()
-            c = canvas.Canvas(bio, pagesize=letter)
-            width, height = letter
-            # Draw background
-            c.setFillColorRGB(0.97,0.95,0.92)
-            c.rect(0,0,width,height,fill=1,stroke=0)
-            # Title
-            c.setFont('Helvetica-Bold', 20)
-            c.setFillColorRGB(0.07,0.12,0.2)
-            c.drawString(40, height-60, 'PawSense Report')
-            # Message content
-            c.setFont('Helvetica', 12)
-            text = msg.content or ''
-            text_y = height - 90
-            for line in textwrap.wrap(text, 80):
-                c.drawString(40, text_y, line)
-                text_y -= 14
-                if text_y < 160:
-                    break
-            # Include image caption if present
-            if getattr(msg, 'image_caption', None):
-                caption_lines = textwrap.wrap('Caption: ' + (msg.image_caption or ''), 80)
-                caption_y = text_y - 12
-                c.setFont('Helvetica-Oblique', 11)
-                for cl in caption_lines:
-                    c.drawString(40, caption_y, cl)
-                    caption_y -= 12
-                    if caption_y < 140:
-                        break
-            # Draw image on the right
-            img_w = 300
-            img_h = 300
-            img_x = width - img_w - 40
-            img_y = height - img_h - 120
-            c.drawImage(img_reader, img_x, img_y, width=img_w, height=img_h, preserveAspectRatio=True)
-            # Footer
-            c.setFont('Helvetica-Oblique', 9)
-            c.drawString(40, 30, f'Report generated by PawSense — {datetime.utcnow().isoformat()}')
-            c.showPage()
-            c.save()
-            bio.seek(0)
-            return send_file(bio, mimetype='application/pdf', as_attachment=True, download_name=f'pawsense-report-{message_id}.pdf')
+            bio = generate_single_message_pdf(msg, user, app.config['UPLOAD_FOLDER'])
+            return send_file(bio, mimetype='application/pdf', as_attachment=True, download_name=f'pawsense-diagnostic-report-{message_id}.pdf')
         except Exception as e:
+            print(f"Error compiling message PDF: {e}")
             return jsonify({'error':'Failed to generate PDF', 'detail': str(e)}), 500
 
 

@@ -489,6 +489,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     newChatBtn.addEventListener('click', createNewSession);
 
+    // Export Entire Chat Session as Clinical PDF
+    const exportChatPdfBtn = document.getElementById('export-chat-pdf-btn');
+    if (exportChatPdfBtn) {
+        exportChatPdfBtn.addEventListener('click', () => {
+            if (!currentSessionId) {
+                alert('Please start or select a conversation first before exporting.');
+                return;
+            }
+            window.open(`/api/sessions/${currentSessionId}/export_pdf`, '_blank');
+        });
+    }
+
     // Send Message
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -701,6 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ` : `
             <div class="message-actions">
                 <button type="button" class="tts-btn" title="Read Aloud"><i class="fas fa-volume-up"></i></button>
+                <button type="button" class="msg-action-btn pdf-msg-btn" title="Export as PDF Report"><i class="fas fa-file-pdf"></i> PDF</button>
                 <button type="button" class="msg-action-btn copy-msg-btn" title="Copy text"><i class="fas fa-copy"></i></button>
             </div>
         `;
@@ -725,6 +738,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cap = el.getAttribute('data-caption') || '';
                 if (fullUrl) {
                     openLightbox(fullUrl, cap);
+                }
+            });
+        });
+
+        // Attach click listener for downloading message as a clinical PDF
+        msgDiv.querySelectorAll('.pdf-msg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mid = msgDiv.dataset.messageId || messageId;
+                if (mid) {
+                    window.open(`/api/message/report_pdf/${mid}`, '_blank');
+                } else {
+                    alert('Message ID not found. Please refresh or select a conversation.');
                 }
             });
         });
