@@ -770,6 +770,7 @@ document.addEventListener('DOMContentLoaded', () => {
             textContainer.innerHTML = formattedContent;
             const elements = textContainer.querySelectorAll('*');
             elements.forEach(el => {
+                if (el.closest('.pdf-chat-card') || el.classList.contains('pdf-chat-card')) return;
                 if(el.children.length === 0 && el.textContent.trim() !== '') {
                     const words = el.textContent.split(' ');
                     el.innerHTML = words.map(w => `<span style="opacity:0; transition: opacity 0.1s; display:inline-block;">${w}&nbsp;</span>`).join('');

@@ -72,3 +72,56 @@ def test_generate_session_pdf_endpoint(tmp_path):
     assert resp_msg.status_code == 200
     assert resp_msg.mimetype == 'application/pdf'
     assert resp_msg.data.startswith(b'%PDF')
+
+
+def test_detect_pdf_intent():
+    assert pg.detect_pdf_intent("Convert this into pdf") is True
+    assert pg.detect_pdf_intent("convert this into pdf") is True
+    assert pg.detect_pdf_intent("give me pdf") is True
+    assert pg.detect_pdf_intent("make a pdf of this chat") is True
+    assert pg.detect_pdf_intent("export to pdf") is True
+    assert pg.detect_pdf_intent("/pdf") is True
+    assert pg.detect_pdf_intent("see i said to convert this into pdf but its telling to do other method i dont want like that give shoukd be give in chat with converted pdf") is True
+    assert pg.detect_pdf_intent("What is the best diet for a golden retriever?") is False
+
+
+def test_api_chat_pdf_intent_handling():
+    client = app.test_client()
+
+    with app.app_context():
+        user = User.query.filter_by(username='pdf_test_user').first()
+        if not user:
+            user = User(username='pdf_test_user', password_hash='hash')
+            db.session.add(user)
+            db.session.commit()
+
+        session_obj = ChatSession(user_id=user.id, title="Diet Advice Session")
+        db.session.add(session_obj)
+        db.session.commit()
+
+        # Add an initial consultation message
+        m_msg = Message(session_id=session_obj.id, role='model', content="Feed cooked chicken and pumpkin.")
+        db.session.add(m_msg)
+        db.session.commit()
+        session_id = session_obj.id
+        user_id = user.id
+
+    with client.session_transaction() as sess:
+        sess['user_id'] = user_id
+
+    # User asks to convert into PDF
+    resp = client.post('/api/chat', data={
+        'session_id': session_id,
+        'content': 'Convert this into pdf'
+    })
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert 'model_message' in data
+    model_msg = data['model_message']
+    assert model_msg['pdf_url'] == f"/api/sessions/{session_id}/export_pdf"
+    assert 'pdf-chat-card' in model_msg['content']
+    assert 'clinical veterinary pdf report' in model_msg['content'].lower()
+    # Ensure it didn't give the generic LLM refusal
+    assert "as an ai language model" not in model_msg['content'].lower()
+

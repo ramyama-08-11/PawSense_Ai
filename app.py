@@ -29,7 +29,7 @@ from datetime import datetime
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from image_generator import detect_image_intent, generate_pet_image, enhance_prompt, IMAGE_STYLES
-from pdf_generator import generate_session_pdf, generate_single_message_pdf
+from pdf_generator import generate_session_pdf, generate_single_message_pdf, detect_pdf_intent
 
 load_dotenv()
 
@@ -882,6 +882,9 @@ def generate_ai_reply(content, language='English', custom_instructions='', image
     """Helper to generate pet care advice from Gemini multimodal models."""
     system_instruction = (
         f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\n"
+        f"PLATFORM CAPABILITIES: PawSense HAS a built-in automated Veterinary Clinical PDF Generator and an AI Image Studio. "
+        f"NEVER say 'as an AI language model I cannot create, convert, or generate PDF files or images' because PawSense HAS these features built-in. "
+        f"If the user asks for a PDF report or asks to convert the advice into PDF, confirm that the PDF is being prepared and direct them to the PDF report link or header PDF button.\n\n"
         f"CRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. "
         f"Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
     )
@@ -1083,8 +1086,81 @@ def chat():
             }
         })
 
+    # Check if this is a PDF generation/export request (via slash command or natural language intent)
+    is_pdf_intent = detect_pdf_intent(content)
+    is_pdf_req = request.form.get('is_pdf_request', '').lower() in ('1', 'true', 'yes') or is_pdf_intent
+
+    if is_pdf_req:
+        pdf_url = f"/api/sessions/{chat_session.id}/export_pdf"
+        session_title_display = chat_session.title if chat_session.title and chat_session.title != "New Conversation" else "PawSense Clinical Consultation"
+        safe_title = re.sub(r'[^\w\s-]', '', session_title_display).strip().replace(' ', '_')[:30] or "PawSense_Report"
+        filename_display = f"{safe_title}.pdf"
+
+        # Check if there was an earlier model message in this session
+        prior_model_msgs = [m for m in chat_session.messages if m.role == 'model' and m.id != user_msg.id]
+        latest_model_msg = prior_model_msgs[-1] if prior_model_msgs else None
+        single_msg_pdf_url = f"/api/message/report_pdf/{latest_model_msg.id}" if latest_model_msg else None
+
+        response_content = (
+            f"I have converted your consultation into a clinical veterinary PDF report! 🐾\n\n"
+            f"You can view and download your official document directly below:\n\n"
+            f'<div class="pdf-chat-card">\n'
+            f'    <div class="pdf-chat-card-icon"><i class="fas fa-file-pdf"></i></div>\n'
+            f'    <div class="pdf-chat-card-details">\n'
+            f'        <div class="pdf-card-title">{filename_display}</div>\n'
+            f'        <div class="pdf-card-subtitle">Official PawSense Clinical Veterinary Summary • Ready for Clinic Handover</div>\n'
+            f'    </div>\n'
+            f'    <a href="{pdf_url}" target="_blank" class="pdf-card-dl-btn" download="{filename_display}">\n'
+            f'        <i class="fas fa-download"></i> Download PDF\n'
+            f'    </a>\n'
+            f'</div>\n\n'
+            f"📄 **[Click here to directly download: {filename_display}]({pdf_url})**\n\n"
+        )
+        if single_msg_pdf_url:
+            response_content += f"🩺 *Want just the latest triage sheet? [Download 1-Page Summary PDF]({single_msg_pdf_url})*\n\n"
+
+        response_content += (
+            f"💡 *Tip: You can also click the **PDF** button below any message bubble or the **PDF icon** in the top chat header to export an updated copy anytime.*"
+        )
+
+        model_msg = Message(
+            session_id=chat_session.id,
+            role='model',
+            content=response_content
+        )
+        db.session.add(model_msg)
+        db.session.commit()
+
+        return jsonify({
+            'user_message': {
+                'id': user_msg.id,
+                'role': user_msg.role,
+                'content': user_msg.content,
+                'image_path': user_msg.image_path,
+                'created_at': user_msg.created_at.isoformat()
+            },
+            'model_message': {
+                'id': model_msg.id,
+                'role': model_msg.role,
+                'content': model_msg.content,
+                'created_at': model_msg.created_at.isoformat(),
+                'image_data': None,
+                'image_path': None,
+                'thumb_path': None,
+                'image_caption': None,
+                'pdf_url': pdf_url
+            }
+        })
+
     # System Instruction
-    system_instruction = f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\nCRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
+    system_instruction = (
+        f"You are Pawsense, a premium AI petcare expert. You must provide helpful, kind, and professional advice about pets. \n\n"
+        f"PLATFORM CAPABILITIES: PawSense HAS a built-in automated Veterinary Clinical PDF Generator and an AI Image Studio. "
+        f"NEVER say 'as an AI language model I cannot create, convert, or generate PDF files or images'. "
+        f"PawSense HAS these capabilities built right into the platform. If the user asks for a PDF, confirm that their PDF report is available.\n\n"
+        f"CRITICAL: The user has selected {language}. You MUST respond exclusively in {language}. "
+        f"Do not use English if the language is Hindi or Kannada. Translate all technical terms into {language} where possible.\n\n"
+    )
     if custom_instructions:
         system_instruction += f"USER PREFERENCES: {custom_instructions}\n\n"
 

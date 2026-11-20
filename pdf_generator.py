@@ -69,6 +69,45 @@ class NumberedCanvas(canvas.Canvas):
         self.restoreState()
 
 
+def detect_pdf_intent(text):
+    """
+    Detects if the user's input expresses intent to generate, export, or convert to a PDF.
+    Returns True if PDF intent is detected, False otherwise.
+    """
+    if not text:
+        return False
+    t = text.strip()
+
+    # 1. Slash commands: /pdf, /export-pdf, /report
+    if re.match(r'^/(?:pdf|export-pdf|report)(?:\s.*)?$', t, re.IGNORECASE):
+        return True
+
+    # 2. Must contain 'pdf' somewhere (case-insensitive)
+    if not re.search(r'\bpdf\b', t, re.IGNORECASE):
+        return False
+
+    # 3. Intent patterns with 'pdf'
+    pdf_patterns = [
+        r'\b(?:convert|turn|save|format)\b.*\bpdf\b',
+        r'\bpdf\b.*\b(?:format|file|report|version|document|download|copy)\b',
+        r'\b(?:generate|make|create|build|produce)\b.*\bpdf\b',
+        r'\b(?:export|download|give|send|get|provide|show)\b.*\bpdf\b',
+        r'\b(?:print|need|want|have)\b.*\bpdf\b',
+        r'\bpdf\b.*\b(?:please|pls|now)\b',
+        r'\b(?:into|as|to|in)\s+pdf\b',
+    ]
+    for pat in pdf_patterns:
+        if re.search(pat, t, re.IGNORECASE):
+            return True
+
+    # If the user literally just says "pdf", "pdf please", "into pdf", "in pdf"
+    cleaned = re.sub(r'[^\w\s]', '', t.lower()).split()
+    if len(cleaned) <= 6 and 'pdf' in cleaned:
+        return True
+
+    return False
+
+
 def clean_markdown_for_pdf(text):
     """Converts basic markdown formatting (*, **, lists, newlines) into ReportLab Paragraph XML."""
     if not text:
@@ -440,3 +479,4 @@ def generate_single_message_pdf(msg, user, upload_folder):
     doc.build(story, canvasmaker=NumberedCanvas)
     buffer.seek(0)
     return buffer
+
